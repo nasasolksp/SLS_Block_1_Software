@@ -1,0 +1,22 @@
+NASA – SOL – KSP SLS Block 1 Software License
+Version 1.0
+
+Copyright (c) 2026 NASA – SOL – KSP
+
+Permission is hereby granted to use this software for personal, educational,
+and Kerbal Space Program-related purposes.
+
+Redistribution is permitted ONLY under the following conditions:
+- Full and clear credit must be given to "NASA – SOL – KSP"
+- This license must be included unchanged
+- The software must not be modified or altered
+
+Modification, editing, or creation of derivative works is STRICTLY PROHIBITED
+without prior written permission from NASA – SOL – KSP.
+
+You may NOT:
+- Remove or alter attribution
+- Redistribute modified versions
+- Claim this software as your own
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
