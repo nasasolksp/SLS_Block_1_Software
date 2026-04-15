@@ -9,6 +9,7 @@ GLOBAL FUNCTION InitializeLaunchForecastState {
         "forecast_complete", FALSE,
         "next_checkpoint_seconds", -1,
         "last_checkpoint_seconds", -1,
+        "last_launch_epoch_seconds", -1,
         "rows", LIST()
     ).
 }.
@@ -20,6 +21,7 @@ GLOBAL FUNCTION ResetLaunchForecastState {
     SET state["forecast_complete"] TO FALSE.
     SET state["next_checkpoint_seconds"] TO -1.
     SET state["last_checkpoint_seconds"] TO -1.
+    SET state["last_launch_epoch_seconds"] TO -1.
     SET state["rows"] TO LIST().
 }.
 
@@ -30,8 +32,15 @@ GLOBAL FUNCTION IsLaunchForecastCountdownActive {
         RETURN FALSE.
     }.
 
-    IF towerStatus:HASKEY("abort_active") AND towerStatus["abort_active"] {
-        RETURN FALSE.
+    IF towerStatus:HASKEY("launch_rule_gate_required") AND towerStatus["launch_rule_gate_required"] {
+        RETURN TRUE.
+    }.
+
+    IF towerStatus:HASKEY("launch_epoch_seconds") {
+        LOCAL launchEpochSeconds TO towerStatus["launch_epoch_seconds"]:TONUMBER.
+        IF launchEpochSeconds > 0 AND launchEpochSeconds > TIME:SECONDS {
+            RETURN TRUE.
+        }.
     }.
 
     IF towerStatus:HASKEY("formatted_countdown") {
@@ -86,8 +95,10 @@ GLOBAL FUNCTION UpdateLaunchForecastSchedule {
     }.
 
     LOCAL nextCheckpoint TO currentSeconds - 300.
-    IF nextCheckpoint < 20 {
+    IF currentSeconds <= 120 {
         SET nextCheckpoint TO 20.
+    } ELSE IF nextCheckpoint < 120 {
+        SET nextCheckpoint TO 120.
     }.
     SET state["next_checkpoint_seconds"] TO nextCheckpoint.
 }.
@@ -97,6 +108,13 @@ GLOBAL FUNCTION GetTowerCountdownSeconds {
 
     IF towerStatus:HASKEY("seconds_to_window") {
         RETURN towerStatus["seconds_to_window"]:TONUMBER.
+    }.
+
+    IF towerStatus:HASKEY("launch_epoch_seconds") {
+        LOCAL launchEpochSeconds TO towerStatus["launch_epoch_seconds"]:TONUMBER.
+        IF launchEpochSeconds > 0 {
+            RETURN MAX(0, launchEpochSeconds - TIME:SECONDS).
+        }.
     }.
 
     IF towerStatus:HASKEY("countdown_seconds") {
@@ -119,7 +137,7 @@ GLOBAL FUNCTION BuildLaunchForecastSnapshot {
         resolvedManifest
     ).
 
-    LOCAL routePoints TO BuildLaunchForecastTrajectorySamples(bestRoute, orbitSettings, sampleIndex).
+    LOCAL routePoints TO BuildLaunchForecastTrajectorySamples(bestRoute, ascentSettings, orbitSettings, sampleIndex).
 
     RETURN LEXICON(
         "sample_index", sampleIndex,
@@ -379,31 +397,99 @@ GLOBAL FUNCTION EstimateForecastHandoffDownrange {
 }.
 
 GLOBAL FUNCTION BuildLaunchForecastTrajectorySamples {
-    PARAMETER routeAssessment, orbitSettings, sampleIndex.
+    PARAMETER routeAssessment, ascentSettings, orbitSettings, sampleIndex.
 
-    LOCAL sampleCount TO 16.
-    LOCAL routePoints TO "".
+    LOCAL sampleCount TO 24.
     LOCAL launchAltitude TO SHIP:ALTITUDE.
     LOCAL targetAltitude TO orbitSettings["stage_one_handoff_apoapsis"].
-    LOCAL targetDownrange TO routeAssessment["predicted_downrange_m"].
-    LOCAL altitudeExponent TO LerpValue(1.65, 1.05, ClampValue((90 - routeAssessment["gravity_turn_final_pitch_deg"]) / 90, 0, 1)).
-    LOCAL downrangeExponent TO LerpValue(1.55, 0.95, ClampValue((90 - routeAssessment["gravity_turn_final_pitch_deg"]) / 90, 0, 1)).
+    LOCAL targetDownrange TO MAX(1, routeAssessment["predicted_downrange_m"]).
+    LOCAL routePoints TO "".
+    LOCAL rawWeights TO LIST().
+    LOCAL totalWeight TO 0.
+    LOCAL previousAltitude TO launchAltitude.
+    LOCAL cumulativeWeight TO 0.
     LOCAL i TO 0.
 
     UNTIL i >= sampleCount {
         LOCAL progress TO i / MAX(1, sampleCount - 1).
-        LOCAL altitudeValue TO launchAltitude + ((targetAltitude - launchAltitude) * (progress ^ altitudeExponent)).
-        LOCAL downrangeValue TO targetDownrange * (progress ^ downrangeExponent).
+        LOCAL altitudeValue TO launchAltitude + ((targetAltitude - launchAltitude) * progress).
+        LOCAL pitchValue TO ComputeForecastPitchAtAltitude(altitudeValue, ascentSettings).
+        LOCAL sampleWeight TO 0.
+
+        IF i > 0 {
+            LOCAL altitudeStep TO MAX(1, altitudeValue - previousAltitude).
+            LOCAL horizontalBias TO MAX(0.02, COS(pitchValue) / MAX(0.25, SIN(pitchValue))).
+            SET sampleWeight TO MAX(0.001, altitudeStep * horizontalBias).
+        }.
+
+        rawWeights:ADD(sampleWeight).
+        SET totalWeight TO totalWeight + sampleWeight.
+        SET previousAltitude TO altitudeValue.
+        SET i TO i + 1.
+    }.
+
+    SET i TO 0.
+    SET previousAltitude TO launchAltitude.
+    UNTIL i >= sampleCount {
+        LOCAL progress TO i / MAX(1, sampleCount - 1).
+        LOCAL altitudeValue TO launchAltitude + ((targetAltitude - launchAltitude) * progress).
+        LOCAL downrangeValue TO targetDownrange * progress.
+
+        IF totalWeight > 0 AND i > 0 {
+            SET cumulativeWeight TO cumulativeWeight + rawWeights[i].
+            SET downrangeValue TO targetDownrange * (cumulativeWeight / totalWeight).
+        }.
 
         IF i > 0 {
             SET routePoints TO routePoints + ";".
         }.
 
         SET routePoints TO routePoints + ROUND(downrangeValue, 0) + "|" + ROUND(altitudeValue, 0).
+        SET previousAltitude TO altitudeValue.
         SET i TO i + 1.
     }.
 
     RETURN routePoints.
+}.
+
+GLOBAL FUNCTION ComputeForecastPitchAtAltitude {
+    PARAMETER altitudeMeters, ascentSettings.
+
+    LOCAL pitchoverStart TO ascentSettings["pitchover_start_altitude"].
+    LOCAL pitchoverEnd TO ascentSettings["pitchover_end_altitude"].
+    LOCAL pitchoverStartPitch TO ascentSettings["pitchover_start_pitch"].
+    LOCAL pitchoverEndPitch TO ascentSettings["pitchover_end_pitch"].
+    LOCAL gravityTurnEnd TO ascentSettings["gravity_turn_end_altitude"].
+    LOCAL gravityTurnFinalPitch TO ascentSettings["gravity_turn_final_pitch"].
+
+    IF altitudeMeters <= pitchoverStart {
+        RETURN pitchoverStartPitch.
+    }.
+
+    IF altitudeMeters <= pitchoverEnd {
+        RETURN LerpValue(
+            pitchoverStartPitch,
+            pitchoverEndPitch,
+            SmoothStepValue((altitudeMeters - pitchoverStart) / MAX(1, pitchoverEnd - pitchoverStart))
+        ).
+    }.
+
+    IF altitudeMeters <= gravityTurnEnd {
+        RETURN LerpValue(
+            pitchoverEndPitch,
+            gravityTurnFinalPitch,
+            SmoothStepValue((altitudeMeters - pitchoverEnd) / MAX(1, gravityTurnEnd - pitchoverEnd))
+        ).
+    }.
+
+    RETURN gravityTurnFinalPitch.
+}.
+
+GLOBAL FUNCTION SmoothStepValue {
+    PARAMETER value.
+
+    LOCAL clampedValue TO ClampValue(value, 0, 1).
+    RETURN clampedValue * clampedValue * (3 - (2 * clampedValue)).
 }.
 
 GLOBAL FUNCTION BuildForecastRouteName {

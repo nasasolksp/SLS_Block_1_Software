@@ -26,10 +26,10 @@ GLOBAL FUNCTION GetMissionConfiguration {
     // User-editable mission inputs. Keep this block small.
     LOCAL userSettings TO LEXICON(
         "mission_name", "SLS_ORION_ARTEMIS",
-        "use_mcc_app", TRUE,
+        "use_mcc_app", FALSE,
         "target_body", "Earth",
-        "target_body_apoapsis", 800000,
-        "target_body_periapsis", 456000,
+        "target_body_apoapsis", 1811000,
+        "target_body_periapsis", 687000,
         "target_inclination", -28.62,
         "manual_countdown_time", "00:00:30",
         "wet_dress_enabled", FALSE,

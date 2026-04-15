@@ -37,20 +37,13 @@ GLOBAL launchReadinessSnapshot TO LEXICON(
 
 CLEARSCREEN.
 
-LOCAL scheduledLaunchTime TO requestedLaunchEpochSeconds.
+LOCAL scheduledLaunchTime TO -1.
 
-IF startMode = "standby" AND scheduledLaunchTime < 0 {
-    // The vehicle does not self-arm its countdown. It stays in standby until
-    // the tower publishes a valid handoff message, regardless of whether the
-    // MCC app is enabled.
-    LOCAL handoffData TO WaitForTowerHandoff(missionSettings, launchSettings).
-    SET scheduledLaunchTime TO handoffData["launch_epoch_seconds"].
-}.
-
-IF scheduledLaunchTime < 0 {
-    LOCAL handoffData TO WaitForTowerHandoff(missionSettings, launchSettings).
-    SET scheduledLaunchTime TO handoffData["launch_epoch_seconds"].
-}.
+// The vehicle always waits for a valid tower handoff before entering the
+// terminal countdown sequence. The MCC app and manual countdown paths are
+// only allowed to influence the tower command stream, not bypass handoff.
+LOCAL handoffData TO WaitForTowerHandoff(missionSettings, launchSettings, ascentSettings, orbitSettings, stagingSettings, readinessSettings, resolvedManifest).
+SET scheduledLaunchTime TO handoffData["launch_epoch_seconds"].
 
 IF NOT ValidateResolvedManifest(resolvedManifest) {
     ShowManifestHold(resolvedManifest).
@@ -89,6 +82,7 @@ FUNCTION RunTerminalSequence {
     LOCAL wetDressEnabled TO launchSettings["wet_dress_enabled"].
     LOCAL wetDressStopSeconds TO launchSettings["wet_dress_stop_seconds"].
     LOCAL wetDressHoldActive TO FALSE.
+    LOCAL wetDressHoldLatched TO FALSE.
     LOCAL launchRuleGateRequired TO (launchEpochSeconds - TIME:SECONDS) > 3600.
     LOCAL launchRuleGateTriggered TO FALSE.
     SET launchReadinessSnapshot TO BuildLaunchReadinessReport(
@@ -116,7 +110,8 @@ FUNCTION RunTerminalSequence {
                     abortActive,
                     heldCountdownSeconds,
                     engineStarted,
-                    releaseTriggered
+                    releaseTriggered,
+                    launchRuleGateRequired
                 ).
 
                 SET operatorCommandRevision TO operatorCommand["revision"].
@@ -126,6 +121,10 @@ FUNCTION RunTerminalSequence {
                 SET heldCountdownSeconds TO operatorUpdate["held_countdown_seconds"].
                 SET operatorStatusText TO operatorUpdate["operator_status_text"].
                 SET launchRuleGateRequired TO operatorUpdate["launch_rule_gate_required"].
+
+                IF operatorCommand["command_name"] = "resume" AND wetDressHoldActive {
+                    SET wetDressHoldActive TO FALSE.
+                }.
             }.
         } ELSE {
             SET operatorStatusText TO "LOCAL COUNTDOWN ACTIVE".
@@ -142,8 +141,9 @@ FUNCTION RunTerminalSequence {
             SET secondsToLaunch TO heldCountdownSeconds.
         }.
 
-        IF wetDressEnabled AND NOT wetDressHoldActive AND secondsToLaunch <= wetDressStopSeconds {
+        IF wetDressEnabled AND NOT wetDressHoldLatched AND NOT wetDressHoldActive AND secondsToLaunch <= wetDressStopSeconds {
             SET wetDressHoldActive TO TRUE.
+            SET wetDressHoldLatched TO TRUE.
             SET countdownHoldActive TO TRUE.
             SET heldCountdownSeconds TO MAX(0, secondsToLaunch).
             SET operatorStatusText TO "WET DRESS HOLD".
@@ -234,11 +234,7 @@ FUNCTION RunTerminalSequence {
             resolvedManifest
         ).
 
-        IF countdownArmed AND NOT abortActive AND NOT countdownHoldActive AND secondsToLaunch > 3600 {
-            SET launchRuleGateRequired TO TRUE.
-        }.
-
-        IF launchRuleGateRequired AND NOT launchRuleGateTriggered AND secondsToLaunch <= 3600 {
+        IF launchRuleGateRequired {
             WriteLaunchRuleCheckStatus(
                 missionSettings,
                 launchSettings,
@@ -254,9 +250,11 @@ FUNCTION RunTerminalSequence {
                 abortActive,
                 operatorStatusText,
                 launchRuleGateRequired,
-                TRUE
+                secondsToLaunch <= 3600
             ).
-            SET launchRuleGateTriggered TO TRUE.
+            IF secondsToLaunch <= 3600 {
+                SET launchRuleGateTriggered TO TRUE.
+            }.
         }.
 
         ClearScreenForMode("TERMINAL COUNTDOWN", lastDisplayMode).
@@ -304,10 +302,13 @@ FUNCTION RunTerminalSequence {
 }.
 
 FUNCTION WaitForTowerHandoff {
-    PARAMETER missionSettings, launchSettings.
+    PARAMETER missionSettings, launchSettings, ascentSettings, orbitSettings, stagingSettings, readinessSettings, resolvedManifest.
 
     LOCAL lastDisplayMode TO "".
     LOCAL lastRevision TO 0.
+    LOCAL launchEpochSeconds TO -1.
+    LOCAL launchRuleGateRequired TO FALSE.
+    LOCAL launchRuleGateTriggered TO FALSE.
 
     UNTIL FALSE {
         LOCAL towerCommand TO ReadMccCommand(launchSettings["vehicle_id"], lastRevision).
@@ -320,6 +321,35 @@ FUNCTION WaitForTowerHandoff {
 
                 IF IsValidTowerHandoff(handoffContent) {
                     RETURN handoffContent.
+                }.
+            } ELSE IF towerCommand["command_name"] = "start_countdown" OR towerCommand["command_name"] = "set_countdown" {
+                IF towerCommand["launch_epoch_seconds"] <> "" {
+                    SET launchEpochSeconds TO towerCommand["launch_epoch_seconds"].
+                } ELSE IF towerCommand["countdown_seconds"] >= 0 {
+                    SET launchEpochSeconds TO TIME:SECONDS + towerCommand["countdown_seconds"].
+                }.
+
+                IF towerCommand["countdown_seconds"] > 3600 {
+                    SET launchRuleGateRequired TO TRUE.
+                }.
+            }.
+
+            IF launchEpochSeconds > 0 AND (launchEpochSeconds - TIME:SECONDS) > 3600 {
+                SET launchRuleGateRequired TO TRUE.
+            }.
+        }.
+
+        IF launchEpochSeconds < 0 {
+            LOCAL towerStatus TO ReadBridgeRecord(
+                "0:/NASA/MCC_Interface/tower_status.txt",
+                "/NASA/MCC_Interface/tower_status.txt"
+            ).
+
+            IF IsValidTowerStatusHandoff(towerStatus) {
+                LOCAL fallbackHandoff TO BuildTowerStatusHandoffContent(towerStatus).
+
+                IF IsValidTowerHandoff(fallbackHandoff) {
+                    RETURN fallbackHandoff.
                 }.
             }.
         }.
@@ -350,6 +380,44 @@ FUNCTION WaitForTowerHandoff {
             launchSettings["wet_dress_stop_seconds"],
             FALSE
         ).
+
+        IF launchEpochSeconds > 0 {
+            SET launchReadinessSnapshot TO BuildLaunchReadinessReport(
+                missionSettings,
+                launchSettings,
+                ascentSettings,
+                orbitSettings,
+                stagingSettings,
+                readinessSettings,
+                resolvedManifest
+            ).
+
+            IF launchRuleGateRequired {
+                LOCAL secondsToLaunch TO launchEpochSeconds - TIME:SECONDS.
+
+                WriteLaunchRuleCheckStatus(
+                    missionSettings,
+                    launchSettings,
+                    readinessSettings,
+                    resolvedManifest,
+                    secondsToLaunch,
+                    FALSE,
+                    FALSE,
+                    FALSE,
+                    FALSE,
+                    FALSE,
+                    FALSE,
+                    FALSE,
+                    "AWAITING TOWER HANDOFF",
+                    launchRuleGateRequired,
+                    secondsToLaunch <= 3600
+                ).
+
+                IF secondsToLaunch <= 3600 {
+                    SET launchRuleGateTriggered TO TRUE.
+                }.
+            }.
+        }.
         WAIT 0.1.
     }.
 }.
@@ -370,6 +438,41 @@ FUNCTION BuildTowerHandoffContent {
         "launch_epoch_seconds", launchEpochSeconds,
         "launch_node_longitude", 0
     ).
+}.
+
+FUNCTION BuildTowerStatusHandoffContent {
+    PARAMETER towerStatus.
+
+    LOCAL launchEpochSeconds TO -1.
+
+    IF towerStatus:HASKEY("launch_epoch_seconds") {
+        SET launchEpochSeconds TO towerStatus["launch_epoch_seconds"]:TONUMBER.
+    }.
+
+    RETURN LEXICON(
+        "message_type", "tower_handoff",
+        "launch_epoch_seconds", launchEpochSeconds,
+        "launch_node_longitude", 0
+    ).
+}.
+
+FUNCTION IsValidTowerStatusHandoff {
+    PARAMETER towerStatus.
+
+    IF NOT towerStatus:HASKEY("countdown_armed") {
+        RETURN FALSE.
+    }.
+
+    LOCAL countdownArmedText TO towerStatus["countdown_armed"].
+    IF countdownArmedText <> "TRUE" AND countdownArmedText <> "True" AND countdownArmedText <> "true" {
+        RETURN FALSE.
+    }.
+
+    IF NOT towerStatus:HASKEY("launch_epoch_seconds") {
+        RETURN FALSE.
+    }.
+
+    RETURN towerStatus["launch_epoch_seconds"]:TONUMBER > 0.
 }.
 
 FUNCTION IsValidTowerHandoff {
@@ -448,13 +551,14 @@ FUNCTION ShowStandaloneHold {
 }.
 
 FUNCTION ApplyVehicleOperatorCommand {
-    PARAMETER operatorCommand, launchEpochSeconds, countdownHoldActive, abortActive, heldCountdownSeconds, engineStarted, releaseTriggered.
+    PARAMETER operatorCommand, launchEpochSeconds, countdownHoldActive, abortActive, heldCountdownSeconds, engineStarted, releaseTriggered, currentLaunchRuleGateRequired.
 
     LOCAL commandName TO operatorCommand["command_name"].
     LOCAL updatedLaunchEpochSeconds TO launchEpochSeconds.
     LOCAL updatedHoldActive TO countdownHoldActive.
     LOCAL updatedAbortActive TO abortActive.
     LOCAL updatedHeldCountdownSeconds TO heldCountdownSeconds.
+    LOCAL updatedLaunchRuleGateRequired TO currentLaunchRuleGateRequired.
     LOCAL operatorStatusText TO "READY".
     LOCAL isLockedOut TO engineStarted OR releaseTriggered.
 
@@ -478,6 +582,8 @@ FUNCTION ApplyVehicleOperatorCommand {
         } ELSE IF operatorCommand["countdown_seconds"] < 0 {
             SET operatorStatusText TO "INVALID COUNT REQUEST".
         } ELSE {
+            SET updatedLaunchRuleGateRequired TO operatorCommand["countdown_seconds"] > 3600.
+
             IF countdownHoldActive {
                 SET updatedHeldCountdownSeconds TO operatorCommand["countdown_seconds"].
             } ELSE {
@@ -496,7 +602,8 @@ FUNCTION ApplyVehicleOperatorCommand {
         "countdown_hold_active", updatedHoldActive,
         "abort_active", updatedAbortActive,
         "held_countdown_seconds", updatedHeldCountdownSeconds,
-        "operator_status_text", operatorStatusText
+        "operator_status_text", operatorStatusText,
+        "launch_rule_gate_required", updatedLaunchRuleGateRequired
     ).
 }.
 
@@ -506,6 +613,7 @@ FUNCTION WriteVehicleBridgeStatus {
     LOCAL eventTimeDisplay TO ResolveVehicleEventTimeDisplay(secondsToLaunch, padReleased).
     LOCAL missionElapsedSeconds TO GetLaunchElapsedSeconds().
     LOCAL wetDressStatusText TO "DISABLED".
+    LOCAL wetDressStopTimeText TO "DISABLED".
 
     IF wetDressEnabled {
         IF wetDressHoldActive {
@@ -513,6 +621,7 @@ FUNCTION WriteVehicleBridgeStatus {
         } ELSE {
             SET wetDressStatusText TO "WET DRESS ARMED TO T-" + FormatCountdown(wetDressStopSeconds).
         }.
+        SET wetDressStopTimeText TO FormatCountdown(wetDressStopSeconds).
     }.
 
     WriteMccVehicleStatus(
@@ -542,7 +651,7 @@ FUNCTION WriteVehicleBridgeStatus {
             "operator_status_text", operatorStatusText,
             "wet_dress_enabled", wetDressEnabled,
             "wet_dress_stop_seconds", wetDressStopSeconds,
-            "wet_dress_stop_time", FormatCountdown(wetDressStopSeconds),
+            "wet_dress_stop_time", wetDressStopTimeText,
             "wet_dress_hold_active", wetDressHoldActive,
             "wet_dress_status_text", wetDressStatusText,
             "readiness_status_text", launchReadinessSnapshot["readiness_state"],
@@ -1189,11 +1298,29 @@ FUNCTION GetLaunchThrustEstimate {
     LOCAL thrustN TO 0.
 
     FOR boosterEnginePart IN resolvedManifest["booster_engines"]["parts"] {
-        SET thrustN TO thrustN + (boosterEnginePart:AVAILABLETHRUSTAT(0) * 1000).
+        LOCAL engineThrustKn TO MAX(
+            MAX(boosterEnginePart:POSSIBLETHRUSTAT(1.0), boosterEnginePart:MAXTHRUSTAT(1.0)),
+            MAX(boosterEnginePart:AVAILABLETHRUSTAT(1.0), boosterEnginePart:THRUST)
+        ).
+        SET engineThrustKn TO MAX(engineThrustKn, 0).
+        SET thrustN TO thrustN + (engineThrustKn * 1000).
     }.
 
     FOR coreEnginePart IN resolvedManifest["core_engines"]["parts"] {
-        SET thrustN TO thrustN + (coreEnginePart:AVAILABLETHRUSTAT(0) * 1000).
+        LOCAL engineThrustKn TO MAX(
+            MAX(coreEnginePart:POSSIBLETHRUSTAT(1.0), coreEnginePart:MAXTHRUSTAT(1.0)),
+            MAX(coreEnginePart:AVAILABLETHRUSTAT(1.0), coreEnginePart:THRUST)
+        ).
+        SET engineThrustKn TO MAX(engineThrustKn, 0).
+        SET thrustN TO thrustN + (engineThrustKn * 1000).
+    }.
+
+    IF thrustN <= 0 {
+        LOCAL engineCount TO resolvedManifest["booster_engines"]["parts"]:LENGTH + resolvedManifest["core_engines"]["parts"]:LENGTH.
+
+        IF engineCount > 0 AND SHIP:MAXTHRUSTAT(1.0) > 0 {
+            RETURN SHIP:MAXTHRUSTAT(1.0).
+        }.
     }.
 
     RETURN thrustN.
@@ -1376,7 +1503,8 @@ FUNCTION DrawLine {
 FUNCTION FormatCountdown {
     PARAMETER totalSeconds.
 
-    LOCAL roundedSeconds TO ROUND(MAX(0, totalSeconds), 0).
+    LOCAL normalizedSeconds TO NormalizeSecondsValue(totalSeconds).
+    LOCAL roundedSeconds TO ROUND(MAX(0, normalizedSeconds), 0).
     LOCAL hours TO FLOOR(roundedSeconds / 3600).
     LOCAL remainingSeconds TO roundedSeconds - (hours * 3600).
     LOCAL minutes TO FLOOR(remainingSeconds / 60).
@@ -1388,7 +1516,8 @@ FUNCTION FormatCountdown {
 FUNCTION FormatMissionTime {
     PARAMETER totalSeconds.
 
-    LOCAL roundedSeconds TO ROUND(MAX(0, totalSeconds), 0).
+    LOCAL normalizedSeconds TO NormalizeSecondsValue(totalSeconds).
+    LOCAL roundedSeconds TO ROUND(MAX(0, normalizedSeconds), 0).
     LOCAL hours TO FLOOR(roundedSeconds / 3600).
     LOCAL remainingSeconds TO roundedSeconds - (hours * 3600).
     LOCAL minutes TO FLOOR(remainingSeconds / 60).
@@ -1412,7 +1541,27 @@ FUNCTION FormatTwoDigits {
 FUNCTION PadDisplayText {
     PARAMETER text.
 
-    RETURN text + "                                                  ".
+    RETURN "" + text + "                                                  ".
+}.
+
+FUNCTION NormalizeSecondsValue {
+    PARAMETER rawValue.
+
+    LOCAL secondsText TO "" + rawValue.
+
+    IF secondsText = "" {
+        RETURN 0.
+    }.
+
+    IF secondsText = "FALSE" OR secondsText = "False" OR secondsText = "FALSE." {
+        RETURN 0.
+    }.
+
+    IF secondsText = "TRUE" OR secondsText = "True" OR secondsText = "TRUE." {
+        RETURN 0.
+    }.
+
+    RETURN secondsText:TONUMBER.
 }.
 
 FUNCTION ClearScreenForMode {

@@ -39,6 +39,7 @@ FUNCTION RunCountdown {
     LOCAL lastDisplayMode TO "".
     LOCAL useMccApp TO missionSettings["use_mcc_app"].
     LOCAL launchRuleGateRequired TO FALSE.
+    LOCAL wetDressHoldMirrored TO FALSE.
 
     CLEARSCREEN.
 
@@ -96,6 +97,42 @@ FUNCTION RunCountdown {
             }.
         }.
 
+        IF launchSettings:HASKEY("wet_dress_enabled") AND launchSettings["wet_dress_enabled"] {
+            LOCAL vehicleStatus TO ReadBridgeRecord(
+                "0:/NASA/MCC_Interface/vehicle_status.txt",
+                "/NASA/MCC_Interface/vehicle_status.txt"
+            ).
+            LOCAL vehicleWetDressHoldActive TO FALSE.
+
+            IF vehicleStatus:HASKEY("wet_dress_hold_active") {
+                IF vehicleStatus["wet_dress_hold_active"] = "True" OR vehicleStatus["wet_dress_hold_active"] = "TRUE" OR vehicleStatus["wet_dress_hold_active"] = "true" {
+                    SET vehicleWetDressHoldActive TO TRUE.
+                }.
+            }.
+
+            IF vehicleStatus:HASKEY("wet_dress_status_text") AND vehicleStatus["wet_dress_status_text"] = "WET DRESS HOLD" {
+                SET vehicleWetDressHoldActive TO TRUE.
+            }.
+
+            IF vehicleStatus:HASKEY("operator_status_text") AND vehicleStatus["operator_status_text"] = "WET DRESS HOLD" {
+                SET vehicleWetDressHoldActive TO TRUE.
+            }.
+
+            IF vehicleWetDressHoldActive AND NOT wetDressHoldMirrored {
+                SET countdownHoldActive TO TRUE.
+                SET heldCountdownSeconds TO MAX(0, launchEpochSeconds - TIME:SECONDS).
+                SET operatorStatusText TO "WET DRESS HOLD".
+            } ELSE IF NOT vehicleWetDressHoldActive AND wetDressHoldMirrored {
+                IF countdownHoldActive {
+                    SET launchEpochSeconds TO TIME:SECONDS + heldCountdownSeconds.
+                }.
+                SET countdownHoldActive TO FALSE.
+                SET operatorStatusText TO "WET DRESS RESUME".
+            }.
+
+            SET wetDressHoldMirrored TO vehicleWetDressHoldActive.
+        }.
+
         IF abortActive {
             SET modeStatusText TO "ABORT".
             SET secondsToWindow TO heldCountdownSeconds.
@@ -103,6 +140,11 @@ FUNCTION RunCountdown {
             SET relativeInclination TO 0.
         } ELSE IF NOT countdownArmed {
             SET modeStatusText TO "AWAITING START".
+            SET secondsToWindow TO 0.
+            SET windowLongitude TO siteLongitude.
+            SET relativeInclination TO 0.
+        } ELSE IF launchEpochSeconds < 0 {
+            SET modeStatusText TO "TOWER ARMED".
             SET secondsToWindow TO 0.
             SET windowLongitude TO siteLongitude.
             SET relativeInclination TO 0.
@@ -268,15 +310,13 @@ FUNCTION ApplyTowerOperatorCommand {
 
     IF commandName = "start_countdown" {
         SET updatedCountdownMode TO ResolveCountdownModeFromSelection(updatedLaunchWindowMode, updatedTargetBodyName, SHIP:BODY).
-        LOCAL countdownInitialization TO InitializeCountdownFromCommand(updatedCountdownMode, updatedLaunchEpochSeconds, missionSettings, updatedTargetBodyName).
-        SET updatedCountdownMode TO countdownInitialization["countdown_mode"].
-        SET updatedLaunchEpochSeconds TO countdownInitialization["launch_epoch_seconds"].
-        SET updatedHeldCountdownSeconds TO countdownInitialization["held_countdown_seconds"].
-        SET updatedCountdownArmed TO countdownInitialization["countdown_armed"].
-        SET updatedLaunchRuleGateRequired TO (updatedLaunchEpochSeconds - TIME:SECONDS) > 3600.
+        SET updatedLaunchEpochSeconds TO -1.
+        SET updatedHeldCountdownSeconds TO 0.
+        SET updatedCountdownArmed TO TRUE.
+        SET updatedLaunchRuleGateRequired TO FALSE.
         SET updatedHoldActive TO FALSE.
         SET updatedAbortActive TO FALSE.
-        SET operatorStatusText TO countdownInitialization["operator_status_text"].
+        SET operatorStatusText TO "TOWER ARMED".
     } ELSE IF commandName = "hold" {
         SET updatedHoldActive TO TRUE.
         SET updatedHeldCountdownSeconds TO MAX(0, launchEpochSeconds - TIME:SECONDS).
@@ -380,6 +420,11 @@ FUNCTION InitializeCountdownFromCommand {
 FUNCTION WriteTowerBridgeStatus {
     PARAMETER missionSettings, launchSettings, selectedTargetBodyName, countdownMode, modeStatusText, siteLatitude, siteLongitude, windowLongitude, relativeInclination, secondsToWindow, handoffComplete, countdownHoldActive, operatorStatusText, launchEpochSeconds, countdownArmed, abortActive, launchRuleGateRequired.
 
+    LOCAL formattedCountdown TO FormatCountdown(secondsToWindow).
+    IF launchEpochSeconds < 0 {
+        SET formattedCountdown TO "ARMED".
+    }.
+
     WriteMccTowerStatus(
         LEXICON(
             "source", "tower",
@@ -395,7 +440,7 @@ FUNCTION WriteTowerBridgeStatus {
             "abort_active", abortActive,
             "operator_status_text", operatorStatusText,
             "seconds_to_window", ROUND(MAX(0, secondsToWindow), 1),
-            "formatted_countdown", FormatCountdown(secondsToWindow),
+            "formatted_countdown", formattedCountdown,
             "handoff_complete", handoffComplete,
             "launch_epoch_seconds", launchEpochSeconds,
             "site_latitude", ROUND(siteLatitude, 4),

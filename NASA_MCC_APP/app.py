@@ -571,6 +571,9 @@ class NasaMccApp(tk.Tk):
         self.launch_forecast_rows: list[dict[str, Any]] = []
         self.launch_rule_check_rows: list[dict[str, Any]] = []
         self.predicted_flight_points: list[dict[str, float]] = []
+        self.live_trajectory_points: list[dict[str, float]] = []
+        self.last_live_trajectory_updated_at: str = ""
+        self.last_live_trajectory_signature: tuple[float, float, float, float] | None = None
         self.launch_rule_gate_started_above_t60 = False
         self.visual_summary_vars = {
             "status": tk.StringVar(value="Awaiting flight data"),
@@ -644,6 +647,31 @@ class NasaMccApp(tk.Tk):
             padding=(16, 10),
         )
         self.style.map("TNotebook.Tab", background=[("selected", self.colors["highlight"])], foreground=[("selected", self.colors["text"])])
+        self.style.configure(
+            "Dark.Treeview",
+            background="#06111d",
+            fieldbackground="#06111d",
+            foreground=self.colors["text"],
+            bordercolor="#243b52",
+            rowheight=28,
+        )
+        self.style.configure(
+            "Dark.Treeview.Heading",
+            background="#0b1b2d",
+            foreground=self.colors["text"],
+            relief="flat",
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.style.map(
+            "Dark.Treeview",
+            background=[("selected", self.colors["highlight"])],
+            foreground=[("selected", self.colors["text"])],
+        )
+        self.style.map(
+            "Dark.Treeview.Heading",
+            background=[("active", "#123047")],
+            foreground=[("active", self.colors["text"])],
+        )
 
     def clear_root(self) -> None:
         for child in self.winfo_children():
@@ -944,9 +972,7 @@ class NasaMccApp(tk.Tk):
         notebook.grid(row=0, column=0, sticky="nsew")
 
         actual_tab = ttk.Frame(notebook, style="Panel.TFrame", padding=12)
-        predicted_tab = ttk.Frame(notebook, style="Panel.TFrame", padding=12)
         notebook.add(actual_tab, text="Actual Flight Path")
-        notebook.add(predicted_tab, text="Predicted Flight Path")
 
         actual_tab.rowconfigure(1, weight=1)
         actual_tab.columnconfigure(0, weight=1)
@@ -974,33 +1000,6 @@ class NasaMccApp(tk.Tk):
         )
         self.flight_graph_canvas.grid(row=0, column=0, sticky="nsew")
         self.flight_graph_canvas.bind("<Configure>", self.on_flight_graph_configure)
-
-        predicted_tab.rowconfigure(1, weight=1)
-        predicted_tab.columnconfigure(0, weight=1)
-        predicted_summary_shell = ttk.Frame(predicted_tab, style="Panel.TFrame", padding=0)
-        predicted_summary_shell.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        for column in range(6):
-            predicted_summary_shell.columnconfigure(column, weight=1, uniform="visual_forecast")
-        self.build_top_summary_item(predicted_summary_shell, 0, "Status", self.predicted_summary_vars["status"])
-        self.build_top_summary_item(predicted_summary_shell, 1, "Route", self.predicted_summary_vars["route"])
-        self.build_top_summary_item(predicted_summary_shell, 2, "Altitude", self.predicted_summary_vars["altitude"])
-        self.build_top_summary_item(predicted_summary_shell, 3, "Downrange", self.predicted_summary_vars["downrange"])
-        self.build_top_summary_item(predicted_summary_shell, 4, "Delta-v / Speed", self.predicted_summary_vars["speed"])
-        self.build_top_summary_item(predicted_summary_shell, 5, "Samples", self.predicted_summary_vars["samples"])
-
-        predicted_graph_shell = ttk.Frame(predicted_tab, style="Panel.TFrame", padding=0)
-        predicted_graph_shell.grid(row=1, column=0, sticky="nsew")
-        predicted_graph_shell.rowconfigure(0, weight=1)
-        predicted_graph_shell.columnconfigure(0, weight=1)
-
-        self.predicted_graph_canvas = tk.Canvas(
-            predicted_graph_shell,
-            background="#06111d",
-            highlightthickness=0,
-            borderwidth=0,
-        )
-        self.predicted_graph_canvas.grid(row=0, column=0, sticky="nsew")
-        self.predicted_graph_canvas.bind("<Configure>", self.on_predicted_graph_configure)
 
     def build_launch_rules_page(self, parent: ttk.Frame) -> None:
         parent.rowconfigure(2, weight=1)
@@ -1035,7 +1034,7 @@ class NasaMccApp(tk.Tk):
         table_shell.columnconfigure(0, weight=1)
 
         columns = ("criterion", "status", "details")
-        self.launch_rules_tree = ttk.Treeview(table_shell, columns=columns, show="headings", height=14)
+        self.launch_rules_tree = ttk.Treeview(table_shell, columns=columns, show="headings", height=14, style="Dark.Treeview")
         self.launch_rules_tree.heading("criterion", text="Criterion")
         self.launch_rules_tree.heading("status", text="Status")
         self.launch_rules_tree.heading("details", text="Details")
@@ -1049,7 +1048,7 @@ class NasaMccApp(tk.Tk):
         rules_scrollbar.grid(row=0, column=1, sticky="ns")
 
     def on_flight_graph_configure(self, _event: tk.Event) -> None:
-        self.draw_flight_graph()
+        self.draw_flight_graph(self.flight_log_points, self.predicted_flight_points)
 
     def on_predicted_graph_configure(self, _event: tk.Event) -> None:
         self.draw_predicted_flight_graph()
@@ -1062,13 +1061,42 @@ class NasaMccApp(tk.Tk):
 
     def refresh_visual_page(self) -> None:
         flight_data = self.current_bundle.get("vehicle_flight", {})
+        vehicle_data = self.current_bundle.get("vehicle", {})
         flight_points = self.load_flight_log_points()
+        live_point = self.select_live_trajectory_point(vehicle_data, flight_data)
         forecast_rows = self.load_launch_forecast_rows()
         forecast_points: list[dict[str, float]] = []
+        live_trajectory_active = live_point is not None
 
-        if self.flight_online and flight_points:
+        if not live_trajectory_active:
+            self.live_trajectory_points = []
+            self.last_live_trajectory_updated_at = ""
+            self.last_live_trajectory_signature = None
+
+        if live_point is not None and live_trajectory_active:
+            live_signature = (
+                round(float(live_point.get("mission_elapsed_seconds", 0.0)), 1),
+                round(float(live_point.get("altitude_m", 0.0)), 1),
+                round(float(live_point.get("downrange_m", 0.0)), 1),
+                round(float(live_point.get("surface_speed_mps", 0.0)), 1),
+            )
+            if live_signature != self.last_live_trajectory_signature:
+                self.live_trajectory_points.append(live_point)
+                self.last_live_trajectory_signature = live_signature
+                self.last_live_trajectory_updated_at = str(flight_data.get("updated_at", vehicle_data.get("updated_at", ""))).strip()
+
+        if live_trajectory_active and flight_points:
             latest_point = flight_points[-1]
-            status_text = str(flight_data.get("status", "Logging")).replace("_", " ").upper()
+            if live_point is not None:
+                live_elapsed = float(live_point.get("mission_elapsed_seconds", 0.0))
+                flight_elapsed = float(flight_points[-1].get("mission_elapsed_seconds", 0.0))
+                live_downrange = float(live_point.get("downrange_m", 0.0))
+                flight_downrange = float(flight_points[-1].get("downrange_m", 0.0))
+                if live_elapsed > flight_elapsed or (live_elapsed == flight_elapsed and live_downrange >= flight_downrange):
+                    latest_point = live_point
+            vehicle_mode_text = str(vehicle_data.get("mode", vehicle_data.get("status", "Logging"))).replace("_", " ").upper()
+            flight_mode_text = str(flight_data.get("mode", flight_data.get("status", "Logging"))).replace("_", " ").upper()
+            status_text = vehicle_mode_text if vehicle_mode_text.startswith(("ASCENT", "FLIGHT")) else flight_mode_text
             self.visual_summary_vars["status"].set(status_text)
             self.visual_summary_vars["route"].set("Live flight log")
             self.visual_summary_vars["altitude"].set(self.format_distance_label(latest_point.get("altitude_m", 0.0)))
@@ -1107,19 +1135,27 @@ class NasaMccApp(tk.Tk):
             self.predicted_summary_vars["downrange"].set(self.format_distance_label(latest_row.get("predicted_downrange_m", 0.0)))
             self.predicted_summary_vars["speed"].set(self.format_speed_label(latest_row.get("estimated_delta_v_mps", 0.0)))
             self.predicted_summary_vars["samples"].set(f"{len(forecast_points)} route points")
+            self.predicted_flight_points = forecast_points
         else:
-            self.predicted_summary_vars["status"].set("AWAITING FORECAST")
-            self.predicted_summary_vars["route"].set("Awaiting launch forecast")
-            self.predicted_summary_vars["altitude"].set("0 m")
-            self.predicted_summary_vars["downrange"].set("0 m")
-            self.predicted_summary_vars["speed"].set("0 m/s")
-            self.predicted_summary_vars["samples"].set("0 route points")
-        self.predicted_flight_points = forecast_points
+            if self.predicted_flight_points:
+                self.predicted_summary_vars["status"].set("FORECAST RETAINED")
+                self.predicted_summary_vars["route"].set("Last known launch forecast")
+                self.predicted_summary_vars["altitude"].set(self.format_distance_label(self.predicted_flight_points[-1].get("altitude_m", 0.0)))
+                self.predicted_summary_vars["downrange"].set(self.format_distance_label(self.predicted_flight_points[-1].get("downrange_m", 0.0)))
+                self.predicted_summary_vars["speed"].set(self.format_speed_label(0.0))
+                self.predicted_summary_vars["samples"].set(f"{len(self.predicted_flight_points)} route points")
+            else:
+                self.predicted_summary_vars["status"].set("AWAITING FORECAST")
+                self.predicted_summary_vars["route"].set("Awaiting launch forecast")
+                self.predicted_summary_vars["altitude"].set("0 m")
+                self.predicted_summary_vars["downrange"].set("0 m")
+                self.predicted_summary_vars["speed"].set("0 m/s")
+                self.predicted_summary_vars["samples"].set("0 route points")
 
         if hasattr(self, "flight_graph_canvas"):
-            self.draw_flight_graph(self.flight_log_points)
-        if hasattr(self, "predicted_graph_canvas"):
-            self.draw_predicted_flight_graph(self.predicted_flight_points)
+            combined_live_points = list(self.flight_log_points)
+            combined_live_points.extend(self.live_trajectory_points)
+            self.draw_flight_graph(combined_live_points, self.predicted_flight_points)
 
     def refresh_launch_rules_page(self) -> None:
         if not hasattr(self, "launch_rules_tree"):
@@ -1238,24 +1274,50 @@ class NasaMccApp(tk.Tk):
             with self.flight_log_path.open("r", encoding="utf-8", newline="") as handle:
                 reader = csv.DictReader(handle)
                 points: list[dict[str, float]] = []
+                launch_reference_latitude: float | None = None
+                launch_reference_longitude: float | None = None
                 for row in reader:
                     altitude_m = self.safe_float(row.get("altitude_m"))
                     downrange_m = self.safe_float(row.get("downrange_m"))
+                    latitude_deg = self.safe_float(row.get("latitude_deg"))
+                    longitude_deg = self.safe_float(row.get("longitude_deg"))
                     if altitude_m is None or downrange_m is None:
-                        continue
+                        if altitude_m is None:
+                            continue
+                        downrange_m = 0.0
+
+                    if (
+                        (downrange_m is None or downrange_m <= 0.0)
+                        and latitude_deg is not None
+                        and longitude_deg is not None
+                    ):
+                        if launch_reference_latitude is None or launch_reference_longitude is None:
+                            launch_reference_latitude = latitude_deg
+                            launch_reference_longitude = longitude_deg
+                            downrange_m = 0.0
+                        else:
+                            downrange_m = self.haversine_distance_m(
+                                launch_reference_latitude,
+                                launch_reference_longitude,
+                                latitude_deg,
+                                longitude_deg,
+                            )
+                    elif launch_reference_latitude is None and latitude_deg is not None and longitude_deg is not None:
+                        launch_reference_latitude = latitude_deg
+                        launch_reference_longitude = longitude_deg
 
                     points.append(
                         {
                             "sample_index": float(self.safe_float(row.get("sample_index")) or len(points)),
                             "mission_elapsed_seconds": float(self.safe_float(row.get("mission_elapsed_seconds")) or 0.0),
                             "altitude_m": altitude_m,
-                            "downrange_m": downrange_m,
+                            "downrange_m": float(downrange_m or 0.0),
                             "vertical_speed_mps": float(self.safe_float(row.get("vertical_speed_mps")) or 0.0),
                             "surface_speed_mps": float(self.safe_float(row.get("surface_speed_mps")) or 0.0),
                             "apoapsis_m": float(self.safe_float(row.get("apoapsis_m")) or 0.0),
                             "periapsis_m": float(self.safe_float(row.get("periapsis_m")) or 0.0),
-                            "latitude_deg": float(self.safe_float(row.get("latitude_deg")) or 0.0),
-                            "longitude_deg": float(self.safe_float(row.get("longitude_deg")) or 0.0),
+                            "latitude_deg": float(latitude_deg or 0.0),
+                            "longitude_deg": float(longitude_deg or 0.0),
                         }
                     )
         except OSError:
@@ -1310,16 +1372,86 @@ class NasaMccApp(tk.Tk):
 
         return points
 
-    def draw_flight_graph(self, points: list[dict[str, float]] | None = None) -> None:
+    def build_live_trajectory_point(self, record: dict[str, Any]) -> dict[str, float] | None:
+        altitude_m = self.safe_float(record.get("altitude"))
+        if altitude_m is None:
+            altitude_m = self.safe_float(record.get("altitude_m"))
+
+        downrange_m = self.safe_float(record.get("downrange_distance_m"))
+        if downrange_m is None:
+            downrange_m = self.safe_float(record.get("downrange_m"))
+
+        current_latitude = self.safe_float(record.get("current_latitude"))
+        if current_latitude is None:
+            current_latitude = self.safe_float(record.get("latitude_deg"))
+
+        current_longitude = self.safe_float(record.get("current_longitude"))
+        if current_longitude is None:
+            current_longitude = self.safe_float(record.get("longitude_deg"))
+
+        launch_latitude = self.safe_float(record.get("launch_reference_latitude"))
+        launch_longitude = self.safe_float(record.get("launch_reference_longitude"))
+        if launch_latitude is None:
+            launch_latitude = self.safe_float(record.get("launch_latitude"))
+        if launch_longitude is None:
+            launch_longitude = self.safe_float(record.get("launch_longitude"))
+
+        if altitude_m is None:
+            return None
+        if (downrange_m is None or downrange_m <= 0.0) and current_latitude is not None and current_longitude is not None and launch_latitude is not None and launch_longitude is not None:
+            downrange_m = self.haversine_distance_m(launch_latitude, launch_longitude, current_latitude, current_longitude)
+
+        if downrange_m is None:
+            downrange_m = 0.0
+
+        return {
+            "sample_index": float(self.safe_float(record.get("sample_index")) or 0.0),
+            "mission_elapsed_seconds": float(self.safe_float(record.get("mission_elapsed_seconds")) or 0.0),
+            "altitude_m": altitude_m,
+            "downrange_m": downrange_m,
+            "vertical_speed_mps": float(self.safe_float(record.get("vertical_speed")) or self.safe_float(record.get("vertical_speed_mps")) or 0.0),
+            "surface_speed_mps": float(self.safe_float(record.get("surface_speed")) or self.safe_float(record.get("surface_speed_mps")) or 0.0),
+            "apoapsis_m": float(self.safe_float(record.get("apoapsis")) or 0.0),
+            "periapsis_m": float(self.safe_float(record.get("periapsis")) or 0.0),
+            "latitude_deg": float(self.safe_float(record.get("current_latitude")) or self.safe_float(record.get("latitude_deg")) or 0.0),
+            "longitude_deg": float(self.safe_float(record.get("current_longitude")) or self.safe_float(record.get("longitude_deg")) or 0.0),
+        }
+
+    @staticmethod
+    def haversine_distance_m(lat1_deg: float, lon1_deg: float, lat2_deg: float, lon2_deg: float) -> float:
+        from math import asin, cos, radians, sin, sqrt
+
+        earth_radius_m = 6371000.0
+        lat1 = radians(lat1_deg)
+        lat2 = radians(lat2_deg)
+        delta_lat = radians(lat2_deg - lat1_deg)
+        delta_lon = radians(lon2_deg - lon1_deg)
+
+        a = sin(delta_lat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(delta_lon / 2) ** 2
+        c = 2 * asin(min(1.0, sqrt(a)))
+        return earth_radius_m * c
+
+    @staticmethod
+    def points_are_similar(left: dict[str, float], right: dict[str, float], tolerance_m: float = 0.25) -> bool:
+        return (
+            int(float(left.get("sample_index", -1))) == int(float(right.get("sample_index", -2)))
+            and
+            abs(float(left.get("altitude_m", 0.0)) - float(right.get("altitude_m", 0.0))) <= tolerance_m
+            and abs(float(left.get("downrange_m", 0.0)) - float(right.get("downrange_m", 0.0))) <= tolerance_m
+        )
+
+    def draw_flight_graph(self, points: list[dict[str, float]] | None = None, overlay_points: list[dict[str, float]] | None = None) -> None:
         if not hasattr(self, "flight_graph_canvas"):
             return
         self.draw_trajectory_graph(
             self.flight_graph_canvas,
             points if points is not None else self.flight_log_points,
+            overlay_points=overlay_points,
             empty_title="Awaiting flight log",
             empty_body="The data CPU will populate vehicle_flight_log.csv during ascent.",
             minimum_height=480,
             path_color=self.colors["accent"],
+            overlay_color="#f39a2f",
         )
 
     def draw_predicted_flight_graph(self, points: list[dict[str, float]] | None = None) -> None:
@@ -1339,10 +1471,12 @@ class NasaMccApp(tk.Tk):
         canvas: tk.Canvas,
         points: list[dict[str, float]] | None,
         *,
+        overlay_points: list[dict[str, float]] | None = None,
         empty_title: str,
         empty_body: str,
         minimum_height: int,
         path_color: str,
+        overlay_color: str | None = None,
     ) -> None:
         canvas.delete("all")
 
@@ -1356,8 +1490,15 @@ class NasaMccApp(tk.Tk):
         plot_bottom = 54
         plot_width = max(10, width - plot_left - plot_right)
         plot_height = max(10, height - plot_top - plot_bottom)
+        overlay_color = overlay_color or self.colors["gold"]
 
-        if not points:
+        all_points: list[dict[str, float]] = []
+        if points:
+            all_points.extend(points)
+        if overlay_points:
+            all_points.extend(overlay_points)
+
+        if not all_points:
             canvas.create_text(
                 width / 2,
                 height / 2 - 12,
@@ -1374,8 +1515,8 @@ class NasaMccApp(tk.Tk):
             )
             return
 
-        x_values = [point["downrange_m"] / 1000.0 for point in points]
-        y_values = [point["altitude_m"] / 1000.0 for point in points]
+        x_values = [point["downrange_m"] / 1000.0 for point in all_points]
+        y_values = [point["altitude_m"] / 1000.0 for point in all_points]
         max_x = max(max(x_values), 1.0)
         max_y = max(max(y_values), 1.0)
         x_scale = plot_width / max_x
@@ -1397,26 +1538,39 @@ class NasaMccApp(tk.Tk):
         canvas.create_line(plot_left, plot_top, plot_left, plot_top + plot_height, fill="#3d5f7b", width=2)
         canvas.create_line(plot_left, plot_top + plot_height, plot_left + plot_width, plot_top + plot_height, fill="#3d5f7b", width=2)
 
-        path_points: list[float] = []
-        for point in points:
-            x_pos, y_pos = project(point)
-            path_points.extend((x_pos, y_pos))
+        def to_canvas_points(path_points: list[dict[str, float]]) -> list[float]:
+            coords: list[float] = []
+            for point in path_points:
+                x_pos, y_pos = project(point)
+                coords.extend((x_pos, y_pos))
+            return coords
 
-        if len(path_points) >= 4:
-            canvas.create_line(*path_points, fill=path_color, width=2, smooth=True)
+        if overlay_points:
+            overlay_coords = to_canvas_points(overlay_points)
+            if len(overlay_coords) >= 4:
+                canvas.create_line(*overlay_coords, fill=overlay_color, width=3, smooth=True, dash=(8, 5))
 
-        for index, point in enumerate(points[-30:]):
+        path_coords = to_canvas_points(points or [])
+        if len(path_coords) >= 4:
+            canvas.create_line(*path_coords, fill=path_color, width=2, smooth=True)
+
+        for index, point in enumerate((overlay_points or [])[-30:]):
             x_pos, y_pos = project(point)
-            radius = 3 if index < len(points[-30:]) - 1 else 5
-            fill_color = self.colors["gold"] if index < len(points[-30:]) - 1 else self.colors["highlight"]
+            radius = 2 if index < len((overlay_points or [])[-30:]) - 1 else 4
+            canvas.create_oval(x_pos - radius, y_pos - radius, x_pos + radius, y_pos + radius, fill=overlay_color, outline="")
+
+        for index, point in enumerate((points or [])[-30:]):
+            x_pos, y_pos = project(point)
+            radius = 3 if index < len((points or [])[-30:]) - 1 else 5
+            fill_color = self.colors["gold"] if index < len((points or [])[-30:]) - 1 else self.colors["highlight"]
             canvas.create_oval(x_pos - radius, y_pos - radius, x_pos + radius, y_pos + radius, fill=fill_color, outline="")
 
-        latest_point = points[-1]
+        latest_point = (points or all_points)[-1]
         latest_x, latest_y = project(latest_point)
         canvas.create_text(
             latest_x + 8,
             latest_y - 18,
-            text=f"{latest_point['altitude_m'] / 1000.0:.1f} km",
+            text=f"{latest_point['downrange_m'] / 1000.0:.1f} km downrange",
             fill=self.colors["text"],
             anchor="w",
             font=("Consolas", 10, "bold"),
@@ -1440,6 +1594,15 @@ class NasaMccApp(tk.Tk):
             anchor="e",
             font=("Segoe UI", 10),
         )
+        if overlay_points:
+            canvas.create_text(
+                width - plot_right,
+                plot_top - 6,
+                text="Orange dashed trace: predicted path",
+                fill=overlay_color,
+                anchor="e",
+                font=("Segoe UI", 10, "bold"),
+            )
 
     @staticmethod
     def safe_float(value: Any) -> float | None:
@@ -1579,18 +1742,7 @@ class NasaMccApp(tk.Tk):
             return
         target_body = self.target_body_var.get()
         launch_window_mode = self.resolve_launch_window_mode(target_body)
-
-        countdown_seconds: int | None = None
-        command_name = "start_countdown"
-        if launch_window_mode == "MANUAL_COUNTDOWN":
-            try:
-                countdown_seconds = parse_countdown_to_seconds(self.countdown_var.get())
-            except ValueError as exc:
-                messagebox.showerror("Invalid Countdown", str(exc))
-                return
-            command_name = "set_countdown"
-
-        self.dispatch_command(command_name, countdown_seconds, target_body, launch_window_mode)
+        self.dispatch_command("start_countdown", None, target_body, launch_window_mode)
 
     def send_abort(self) -> None:
         if not self.ensure_tower_online("Abort"):
@@ -1633,10 +1785,15 @@ class NasaMccApp(tk.Tk):
         self.command_status_var.set(f"Command queued: {command_text} | Revision {payload['command_revision']}")
         self.push_log(self.command_status_var.get())
 
+        if self.pending_command_clear is not None:
+            self.after_cancel(self.pending_command_clear)
+        self.pending_command_clear = self.after(1500, self.clear_active_command)
+
     def clear_active_command(self) -> None:
         vehicle_id = VEHICLES[self.selected_vehicle_name.get()]["vehicle_id"]
         payload = self.bridge.clear_command(vehicle_id)
         self.pending_command_clear = None
+        self.command_status_var.set(f"Command cleared | Revision {payload['command_revision']}")
         self.push_log(f"Command auto-cleared | Revision {payload['command_revision']}")
 
     def push_log(self, entry: str) -> None:
@@ -1677,17 +1834,27 @@ class NasaMccApp(tk.Tk):
             tower_mode_text = "Tower CPU not running"
         self.summary_vars["tower_mode"].set(tower_mode_text)
         self.summary_vars["countdown"].set(self.resolve_primary_clock_display())
-        if self.vehicle_online:
-            vehicle_mode_text = str(vehicle.get("mode", vehicle.get("status", "online")))
-        elif self.flight_online:
+        vehicle_mode_value = str(vehicle.get("mode", vehicle.get("status", "online"))).strip().upper()
+        tower_countdown_active = (
+            self.is_truthy(tower.get("countdown_armed"))
+            or self.is_truthy(tower.get("countdown_hold_active"))
+            or "COUNTDOWN" in str(tower.get("mode_status_text", tower.get("status", ""))).strip().upper()
+            or "HOLD" in str(tower.get("mode_status_text", tower.get("status", ""))).strip().upper()
+        )
+
+        if self.flight_online:
             vehicle_mode_text = str(flight.get("mode", flight.get("status", "logging")))
+        elif self.vehicle_online:
+            vehicle_mode_text = str(vehicle.get("mode", vehicle.get("status", "online")))
         elif not self.vehicle_session_active:
             vehicle_mode_text = "Awaiting tower handoff"
         else:
             vehicle_mode_text = "Vehicle telemetry stale"
         self.summary_vars["vehicle_mode"].set(vehicle_mode_text)
 
-        if self.vehicle_session_active:
+        if tower_countdown_active and not vehicle_mode_value.startswith(("ASCENT", "FLIGHT")):
+            operator_text = str(tower.get("operator_status_text", "READY"))
+        elif self.vehicle_session_active:
             operator_text = str(vehicle.get("operator_status_text", tower.get("operator_status_text", "READY")))
             wet_dress_text = str(vehicle.get("wet_dress_status_text", "")).strip()
             if wet_dress_text and wet_dress_text.upper() != "DISABLED":
@@ -1758,35 +1925,127 @@ class NasaMccApp(tk.Tk):
         vehicle = self.current_bundle.get("vehicle", {})
         flight = self.current_bundle.get("vehicle_flight", {})
         cache_key = "_summary.primary_clock"
+        vehicle_mode = str(vehicle.get("mode", vehicle.get("status", ""))).strip().upper()
+        vehicle_event_time = str(vehicle.get("formatted_event_time", "")).strip()
+        vehicle_countdown_seconds = self.safe_float(vehicle.get("countdown_seconds"))
+        vehicle_elapsed_seconds = self.safe_float(vehicle.get("mission_elapsed_seconds"))
+        tower_countdown = str(tower.get("formatted_countdown", "")).strip()
+        tower_seconds = self.safe_float(tower.get("seconds_to_window"))
+        tower_countdown_valid = tower_countdown.startswith(("T-", "T+")) and tower_countdown not in {"T-00:00:00", "T+00:00:00"}
 
-        if self.should_force_tower_countdown(tower):
-            tower_countdown = tower.get("formatted_countdown")
-            if isinstance(tower_countdown, str) and tower_countdown.strip().startswith(("T-", "T+")):
-                self.last_known_values[cache_key] = tower_countdown.strip()
-                return tower_countdown.strip()
+        if vehicle_mode.startswith("TERMINAL_COUNTDOWN"):
+            if vehicle_event_time.startswith(("T-", "T+")):
+                self.last_known_values[cache_key] = vehicle_event_time
+                return vehicle_event_time
+            if vehicle_countdown_seconds is not None:
+                vehicle_clock = self.format_signed_clock_from_seconds(vehicle_countdown_seconds)
+                self.last_known_values[cache_key] = vehicle_clock
+                return vehicle_clock
 
-            tower_seconds = tower.get("seconds_to_window")
-            if not self.is_missing_value(tower_seconds):
-                fallback_clock = self.format_signed_clock_from_seconds(tower_seconds)
-                self.last_known_values[cache_key] = fallback_clock
-                return fallback_clock
+        if vehicle_mode.startswith(("ASCENT", "FLIGHT")):
+            if vehicle_event_time.startswith(("T-", "T+")) and vehicle_event_time not in {"T-00:00:00", "T+00:00:00"}:
+                self.last_known_values[cache_key] = vehicle_event_time
+                return vehicle_event_time
+            if vehicle_elapsed_seconds is not None and vehicle_elapsed_seconds > 0:
+                ascent_clock = self.format_elapsed_clock_from_seconds(vehicle_elapsed_seconds)
+                self.last_known_values[cache_key] = ascent_clock
+                return ascent_clock
 
-            return "T-00:00:00"
+        flight_clock_point = self.select_live_trajectory_point(vehicle, flight)
+        if flight_clock_point is not None:
+            ascent_elapsed = float(flight_clock_point.get("mission_elapsed_seconds", 0.0))
+            if ascent_elapsed <= 0 and vehicle_elapsed_seconds is not None and vehicle_elapsed_seconds > 0:
+                ascent_elapsed = vehicle_elapsed_seconds
+            if ascent_elapsed > 0:
+                ascent_clock = self.format_elapsed_clock_from_seconds(ascent_elapsed)
+            else:
+                ascent_clock = "T+00:00:00"
+            self.last_known_values[cache_key] = ascent_clock
+            return ascent_clock
 
-        flight_event_time = flight.get("formatted_event_time")
-        if self.flight_online and isinstance(flight_event_time, str) and flight_event_time.startswith("T"):
-            self.last_known_values[cache_key] = flight_event_time
-            return flight_event_time
+        if tower_countdown_valid:
+            self.last_known_values[cache_key] = tower_countdown
+            return tower_countdown
 
-        vehicle_event_time = vehicle.get("formatted_event_time")
-        if self.vehicle_online and isinstance(vehicle_event_time, str) and vehicle_event_time.startswith("T"):
+        if tower_seconds is not None and tower_seconds > 0:
+            fallback_clock = self.format_signed_clock_from_seconds(tower_seconds)
+            self.last_known_values[cache_key] = fallback_clock
+            return fallback_clock
+
+        if self.tower_online:
+            tower_status = str(
+                tower.get(
+                    "operator_status_text",
+                    tower.get("mode_status_text", tower.get("status", "AWAITING START")),
+                )
+            ).strip()
+            if tower_status:
+                self.last_known_values[cache_key] = tower_status
+                return tower_status
+
+        if vehicle_event_time.startswith(("T-", "T+")):
             self.last_known_values[cache_key] = vehicle_event_time
             return vehicle_event_time
 
         return self.last_known_values.get(cache_key, "T-00:00:00")
 
+    def select_live_trajectory_point(
+        self,
+        vehicle_data: dict[str, Any],
+        flight_data: dict[str, Any],
+    ) -> dict[str, float] | None:
+        candidates: list[tuple[tuple[float, float, float, float, float], dict[str, float]]] = []
+        flight_mode_value = str(flight_data.get("mode", flight_data.get("status", ""))).strip().upper()
+        flight_logging_active = self.is_truthy(flight_data.get("logging_active")) or flight_mode_value.startswith(("FLIGHT", "LOGGING"))
+
+        for source_name, record in (("vehicle", vehicle_data), ("vehicle_flight", flight_data)):
+            point = self.build_live_trajectory_point(record)
+            if point is None:
+                continue
+
+            if source_name == "vehicle" and flight_logging_active:
+                continue
+
+            mode_value = str(record.get("mode", record.get("status", ""))).strip().upper()
+            event_time = str(record.get("formatted_event_time", "")).strip().upper()
+            logging_active = self.is_truthy(record.get("logging_active"))
+            engine_started = self.is_truthy(record.get("engine_started"))
+            pad_released = self.is_truthy(record.get("pad_released"))
+            mission_elapsed = float(point.get("mission_elapsed_seconds", 0.0))
+            has_position = point.get("latitude_deg", 0.0) != 0.0 or point.get("longitude_deg", 0.0) != 0.0
+
+            active = (
+                mission_elapsed > 0
+                or mode_value.startswith(("ASCENT", "FLIGHT", "LOGGING"))
+                or logging_active
+                or engine_started
+                or pad_released
+                or event_time.startswith("T+")
+            )
+            if not active:
+                continue
+
+            score = (
+                1.0 if float(point.get("downrange_m", 0.0)) > 0 else 0.0,
+                1.0 if has_position else 0.0,
+                mission_elapsed,
+                1.0 if mode_value.startswith(("ASCENT", "FLIGHT")) else 0.0,
+                1.0 if logging_active else 0.0,
+                1.0 if source_name == "vehicle" else 0.0,
+            )
+            candidates.append((score, point))
+
+        if not candidates:
+            return None
+
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1]
+
     def should_force_tower_countdown(self, tower_data: dict[str, Any]) -> bool:
         if not self.tower_online:
+            return False
+
+        if self.select_live_trajectory_point(self.current_bundle.get("vehicle", {}), self.current_bundle.get("vehicle_flight", {})) is not None:
             return False
 
         countdown_mode = str(tower_data.get("countdown_mode", "")).strip().upper()
@@ -1796,22 +2055,25 @@ class NasaMccApp(tk.Tk):
         abort_active = self.is_truthy(tower_data.get("abort_active"))
         formatted_countdown = str(tower_data.get("formatted_countdown", "")).strip()
         seconds_to_window = tower_data.get("seconds_to_window")
+        launch_epoch_seconds = self.safe_float(tower_data.get("launch_epoch_seconds"))
 
         if abort_active:
             return True
 
         if countdown_mode == "MANUAL_COUNTDOWN":
-            if formatted_countdown.startswith(("T-", "T+")):
+            if launch_epoch_seconds is not None and launch_epoch_seconds > 0 and formatted_countdown.startswith(("T-", "T+")):
                 return True
-            if not self.is_missing_value(seconds_to_window):
+            seconds_value = self.safe_float(seconds_to_window)
+            if seconds_value is not None and seconds_value > 0:
                 return True
             if countdown_armed or countdown_hold:
                 return True
 
         if "COUNTDOWN" in mode_status or "HOLD" in mode_status:
-            if formatted_countdown.startswith(("T-", "T+")):
+            if launch_epoch_seconds is not None and launch_epoch_seconds > 0 and formatted_countdown.startswith(("T-", "T+")):
                 return True
-            if not self.is_missing_value(seconds_to_window):
+            seconds_value = self.safe_float(seconds_to_window)
+            if seconds_value is not None and seconds_value > 0:
                 return True
             if countdown_armed or countdown_hold:
                 return True
@@ -1834,6 +2096,19 @@ class NasaMccApp(tk.Tk):
         seconds = whole_seconds % 60
         return f"{sign}{hours:02d}:{minutes:02d}:{seconds:02d}"
 
+    @staticmethod
+    def format_elapsed_clock_from_seconds(value: Any) -> str:
+        try:
+            total_seconds = max(0.0, float(value))
+        except (TypeError, ValueError):
+            return "T+00:00:00"
+
+        whole_seconds = int(total_seconds)
+        hours = whole_seconds // 3600
+        minutes = (whole_seconds % 3600) // 60
+        seconds = whole_seconds % 60
+        return f"T+{hours:02d}:{minutes:02d}:{seconds:02d}"
+
 
     def resolve_field_display_value(self, key: str, flattened_data: dict[str, Any]) -> Any:
         if not key:
@@ -1845,13 +2120,17 @@ class NasaMccApp(tk.Tk):
             if source_name == "tower" and self.should_force_tower_countdown(self.current_bundle.get("tower", {})):
                 tower = self.current_bundle.get("tower", {})
                 tower_value = tower.get("formatted_countdown")
-                if isinstance(tower_value, str) and tower_value.strip().startswith(("T-", "T+")):
-                    self.last_known_values[key] = tower_value.strip()
-                    return tower_value.strip()
+                launch_epoch_seconds = self.safe_float(tower.get("launch_epoch_seconds"))
+                if isinstance(tower_value, str):
+                    normalized_tower_value = tower_value.strip()
+                    if launch_epoch_seconds is not None and launch_epoch_seconds > 0 and normalized_tower_value not in {"T-00:00:00", "T+00:00:00"} and normalized_tower_value.startswith(("T-", "T+")):
+                        self.last_known_values[key] = normalized_tower_value
+                        return normalized_tower_value
 
                 tower_seconds = tower.get("seconds_to_window")
-                if not self.is_missing_value(tower_seconds):
-                    display_value = self.format_signed_clock_from_seconds(tower_seconds)
+                tower_seconds_value = self.safe_float(tower_seconds)
+                if tower_seconds_value is not None and tower_seconds_value > 0:
+                    display_value = self.format_signed_clock_from_seconds(tower_seconds_value)
                     self.last_known_values[key] = display_value
                     return display_value
 
@@ -1864,6 +2143,12 @@ class NasaMccApp(tk.Tk):
             return "Awaiting tower handoff"
 
         if key.endswith("formatted_event_time"):
+            active_flight_point = self.select_live_trajectory_point(self.current_bundle.get("vehicle", {}), self.current_bundle.get("vehicle_flight", {}))
+            if source_name in {"vehicle", "vehicle_flight"} and active_flight_point is not None:
+                clock_value = self.format_elapsed_clock_from_seconds(active_flight_point.get("mission_elapsed_seconds", 0.0))
+                self.last_known_values[key] = clock_value
+                return clock_value
+
             if source_name == "vehicle_flight":
                 if not self.flight_online and not self.vehicle_session_active:
                     return "Awaiting flight data"

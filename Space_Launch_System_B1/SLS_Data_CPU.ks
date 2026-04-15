@@ -23,8 +23,11 @@ LOCAL resolvedManifest TO ResolveManifest(partsManifest).
 LOCAL flightLogIntervalSeconds TO 0.25.
 LOCAL standbyIntervalSeconds TO 1.
 LOCAL flightStarted TO FALSE.
+LOCAL flightLoggingActive TO FALSE.
 LOCAL flightSampleIndex TO 0.
 LOCAL flightStartSeconds TO 0.
+LOCAL launchReferenceCaptured TO FALSE.
+LOCAL launchReferenceGeoposition TO LATLNG(0, 0).
 LOCAL launchReferenceLatitude TO 0.
 LOCAL launchReferenceLongitude TO 0.
 LOCAL flightLogLines TO LIST().
@@ -38,7 +41,11 @@ forecastHeaderLines:ADD("sample_index,checkpoint_seconds_to_launch,checkpoint_la
 WriteMccVehicleLaunchForecast(forecastHeaderLines).
 
 UNTIL FALSE {
-    IF IsFlightLoggingActive() {
+    IF IsFlightLoggingActive(launchSettings) {
+        SET flightLoggingActive TO TRUE.
+    }.
+
+    IF flightLoggingActive {
         IF forecastState["rows"]:LENGTH > 0 OR forecastState["forecast_active"] {
             ResetLaunchForecastState(forecastState).
             SET forecastSnapshotIndex TO 0.
@@ -49,6 +56,8 @@ UNTIL FALSE {
             SET flightStarted TO TRUE.
             SET flightSampleIndex TO 0.
             SET flightStartSeconds TO TIME:SECONDS.
+            SET launchReferenceCaptured TO TRUE.
+            SET launchReferenceGeoposition TO SHIP:GEOPOSITION.
             SET launchReferenceLatitude TO SHIP:GEOPOSITION:LAT.
             SET launchReferenceLongitude TO SHIP:GEOPOSITION:LNG.
             SET flightLogLines TO LIST().
@@ -56,7 +65,12 @@ UNTIL FALSE {
         }.
 
         LOCAL missionElapsedSeconds TO TIME:SECONDS - flightStartSeconds.
-        LOCAL downrangeMeters TO ComputeDownrangeDistanceMeters(launchReferenceLatitude, launchReferenceLongitude).
+        LOCAL downrangeMeters TO ComputeDownrangeDistanceMeters(
+            launchReferenceCaptured,
+            launchReferenceGeoposition,
+            launchReferenceLatitude,
+            launchReferenceLongitude
+        ).
         LOCAL statusRecord TO BuildFlightStatusRecord(
             missionSettings,
             launchSettings,
@@ -104,13 +118,26 @@ UNTIL FALSE {
         SET flightStarted TO FALSE.
         SET flightSampleIndex TO 0.
         SET flightStartSeconds TO 0.
+        SET launchReferenceCaptured TO FALSE.
         SET flightLogLines TO LIST().
+        SET flightLoggingActive TO FALSE.
     }.
 
     LOCAL towerStatus TO ReadBridgeRecord(bridgePaths["tower_status_archive_path"], bridgePaths["tower_status_volume_path"]).
 
     IF IsLaunchForecastCountdownActive(towerStatus) {
         LOCAL currentSeconds TO GetTowerCountdownSeconds(towerStatus).
+        LOCAL launchEpochSeconds TO -1.
+
+        IF towerStatus:HASKEY("launch_epoch_seconds") {
+            SET launchEpochSeconds TO towerStatus["launch_epoch_seconds"]:TONUMBER.
+        }.
+
+        IF launchEpochSeconds > 0 AND forecastState["last_launch_epoch_seconds"] <> launchEpochSeconds {
+            ResetLaunchForecastState(forecastState).
+            SET forecastSnapshotIndex TO 0.
+            SET forecastState["last_launch_epoch_seconds"] TO launchEpochSeconds.
+        }.
 
         IF NOT forecastState["forecast_active"] {
             SET forecastState["forecast_active"] TO TRUE.
@@ -119,6 +146,9 @@ UNTIL FALSE {
             SET forecastState["last_checkpoint_seconds"] TO -1.
             SET forecastState["rows"] TO LIST().
             SET forecastSnapshotIndex TO 0.
+            IF launchEpochSeconds > 0 {
+                SET forecastState["last_launch_epoch_seconds"] TO launchEpochSeconds.
+            }.
         }.
 
         IF ShouldCaptureLaunchForecastSnapshot(towerStatus, forecastState) {
@@ -145,19 +175,15 @@ UNTIL FALSE {
             UpdateLaunchForecastSchedule(forecastState, forecastCheckpointSeconds).
             WriteMccVehicleLaunchForecast(BuildLaunchForecastCsvRows(forecastState["rows"])).
         }.
-    } ELSE {
-        IF forecastState["rows"]:LENGTH > 0 OR forecastState["forecast_active"] {
-            ResetLaunchForecastState(forecastState).
-            SET forecastSnapshotIndex TO 0.
-            WriteMccVehicleLaunchForecast(BuildLaunchForecastCsvRows(forecastState["rows"])).
-        }.
     }.
 
     WAIT standbyIntervalSeconds.
 }.
 
 FUNCTION IsFlightLoggingActive {
-    RETURN SHIP:ALTITUDE > 0 OR SHIP:GROUNDSPEED > 0.5 OR ABS(SHIP:VERTICALSPEED) > 0.5.
+    PARAMETER launchSettings.
+
+    RETURN SHIP:ALTITUDE >= launchSettings["tower_clear_altitude"] OR ABS(SHIP:VERTICALSPEED) > 5.
 }.
 
 FUNCTION IsResolvedManifestValid {
@@ -195,10 +221,10 @@ FUNCTION BuildFlightStatusRecord {
         "periapsis", ROUND(periapsisMeters, 2),
         "mission_elapsed_seconds", ROUND(missionElapsedSeconds, 1),
         "formatted_event_time", FormatMissionElapsedTime(missionElapsedSeconds),
-        "launch_reference_latitude", ROUND(launchLatitude, 4),
-        "launch_reference_longitude", ROUND(launchLongitude, 4),
-        "current_latitude", ROUND(currentLatitude, 4),
-        "current_longitude", ROUND(currentLongitude, 4),
+        "launch_reference_latitude", ROUND(launchLatitude, 7),
+        "launch_reference_longitude", ROUND(launchLongitude, 7),
+        "current_latitude", ROUND(currentLatitude, 7),
+        "current_longitude", ROUND(currentLongitude, 7),
         "logging_active", loggingActive,
         "sample_index", sampleIndex,
         "updated_at", TIME:SECONDS
@@ -216,12 +242,16 @@ FUNCTION BuildFlightLogRow {
         ROUND(surfaceSpeedMetersPerSecond, 2) + "," +
         ROUND(apoapsisMeters, 2) + "," +
         ROUND(periapsisMeters, 2) + "," +
-        ROUND(latitudeDegrees, 4) + "," +
-        ROUND(longitudeDegrees, 4).
+        ROUND(latitudeDegrees, 7) + "," +
+        ROUND(longitudeDegrees, 7).
 }.
 
 FUNCTION ComputeDownrangeDistanceMeters {
-    PARAMETER launchLatitude, launchLongitude.
+    PARAMETER launchReferenceCaptured, launchGeoposition, launchLatitude, launchLongitude.
+
+    IF launchReferenceCaptured {
+        RETURN (launchGeoposition:POSITION - SHIP:GEOPOSITION:POSITION):MAG.
+    }.
 
     LOCAL currentLatitude TO SHIP:GEOPOSITION:LAT.
     LOCAL currentLongitude TO SHIP:GEOPOSITION:LNG.

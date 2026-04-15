@@ -2,43 +2,99 @@
   "cards": [
     {
       "card_id": "card_0",
-      "field": "tower.formatted_countdown",
-      "x": 41,
+      "field": "tower.source",
+      "x": 342,
       "y": 12,
-      "width": 321,
+      "width": 320,
       "height": 120
     },
     {
       "card_id": "card_1",
-      "field": "tower.operator_status_text",
-      "x": 390,
+      "field": "vehicle_flight.mission_elapsed_seconds",
+      "x": 15,
       "y": 12,
       "width": 320,
-      "height": 139
+      "height": 120
     },
     {
       "card_id": "card_2",
-      "field": "vehicle.mode",
-      "x": 763,
-      "y": 12,
+      "field": "vehicle.vertical_speed",
+      "x": 12,
+      "y": 336,
       "width": 320,
-      "height": 180
+      "height": 120
     },
     {
       "card_id": "card_3",
       "field": "vehicle.altitude",
-      "x": 23,
-      "y": 208,
+      "x": 12,
+      "y": 213,
       "width": 320,
-      "height": 180
+      "height": 120
     },
     {
       "card_id": "card_0",
-      "field": "launch_rule_check.readiness_target_orbit_speed_mps",
-      "x": 362,
-      "y": 210,
-      "width": 453,
-      "height": 181
+      "field": "vehicle.apoapsis",
+      "x": 336,
+      "y": 213,
+      "width": 320,
+      "height": 120
+    },
+    {
+      "card_id": "card_1",
+      "field": "vehicle.periapsis",
+      "x": 659,
+      "y": 213,
+      "width": 320,
+      "height": 120
+    },
+    {
+      "card_id": "card_2",
+      "field": "vehicle_flight.surface_speed",
+      "x": 335,
+      "y": 335,
+      "width": 320,
+      "height": 120
+    },
+    {
+      "card_id": "card_3",
+      "field": "launch_rule_check.countdown_hold_active",
+      "x": 1207,
+      "y": 12,
+      "width": 320,
+      "height": 120
+    },
+    {
+      "card_id": "card_4",
+      "field": "vehicle_status.current_thrust",
+      "x": 881,
+      "y": 12,
+      "width": 320,
+      "height": 120
+    },
+    {
+      "card_id": "card_5",
+      "field": "command.command",
+      "x": 12,
+      "y": 672,
+      "width": 392,
+      "height": 200
+    },
+    {
+      "card_id": "card_6",
+      "field": "command.command",
+      "x": 424,
+      "y": 672,
+      "width": 392,
+      "height": 200
+    },
+    {
+      "card_id": "card_7",
+      "field": "command.command",
+      "x": 836,
+      "y": 672,
+      "width": 392,
+      "height": 200
     }
   ]
 }
