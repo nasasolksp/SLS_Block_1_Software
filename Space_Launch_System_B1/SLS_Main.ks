@@ -687,6 +687,8 @@ FUNCTION RunStageSeparation {
     }.
 
     ActivateUpperStageRcs(resolvedManifest).
+    ExecuteManifestGroup(resolvedManifest["core_stage_separation_motors"]).
+    WAIT 0.25.
     ExecuteManifestGroup(resolvedManifest["core_stage_separation"]).
     ActivateUpperStageRcs(resolvedManifest).
     ApplyPreferredGuidanceControlReference().
@@ -1120,18 +1122,12 @@ FUNCTION ShapeAscentBlend {
 FUNCTION IgniteUpperStageEngines {
     PARAMETER resolvedManifest.
 
-    LOCAL ignitionDeadline TO TIME:SECONDS + 3.
+    IF GetActiveUpperStageEngineCount(resolvedManifest) > 0 {
+        RETURN.
+    }.
 
-    UNTIL TIME:SECONDS >= ignitionDeadline {
-        FOR upperStageEnginePart IN resolvedManifest["upper_stage_engines"]["parts"] {
-            ActivateEnginePart(upperStageEnginePart).
-        }.
-
-        WAIT 0.2.
-
-        IF GetActiveUpperStageEngineCount(resolvedManifest) > 0 {
-            RETURN.
-        }.
+    FOR upperStageEnginePart IN resolvedManifest["upper_stage_engines"]["parts"] {
+        ActivateEnginePart(upperStageEnginePart).
     }.
 }.
 

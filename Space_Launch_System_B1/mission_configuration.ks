@@ -170,6 +170,7 @@ GLOBAL FUNCTION GetMissionConfiguration {
         "upper_stage_ignition_delay", 2,
         "upper_stage_settle_time", 5,
         "upper_stage_ignition_grace_time", 6,
+        "upper_stage_ullage_prep_lead_time", 20,
         "upper_stage_perigee_raise_start_eta", 45,
         "upper_stage_perigee_raise_throttle_down_band", 40000,
         "upper_stage_perigee_raise_apoapsis_guard_band", 25000,

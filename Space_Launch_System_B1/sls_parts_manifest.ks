@@ -52,6 +52,14 @@ GLOBAL FUNCTION GetSlsPartsManifest {
             "trigger_value", TRUE,
             "trigger_name", "Activate Engine"
         ),
+        "orion_fairing_panels", LEXICON(
+            "lookup_type", "part_name",
+            "identifiers", LIST("benjee10.orion.fairingPanel"),
+            "required_count", 3,
+            "trigger_type", "module_event",
+            "module_name", "ModuleDecouple",
+            "trigger_name", "Decouple"
+        ),
         "abort_launch_motor", LEXICON(
             "lookup_type", "part_title",
             "identifiers", LIST("Orion Launch Abort Motor"),
@@ -107,6 +115,15 @@ GLOBAL FUNCTION GetSlsPartsManifest {
             "required_count", 1,
             "trigger_type", "module_event",
             "trigger_name", "Decouple"
+        ),
+        "core_stage_separation_motors", LEXICON(
+            "lookup_type", "part_name",
+            "identifiers", LIST("bluedog.Lateraltron"),
+            "required_count", 2,
+            "trigger_type", "module_action",
+            "module_name", "ModuleEnginesRF",
+            "trigger_value", TRUE,
+            "trigger_name", "Activate Engine"
         ),
         "upper_stage_rcs_hardware", LEXICON(
             "lookup_type", "part_title",

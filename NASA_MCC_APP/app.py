@@ -14,7 +14,7 @@ from mcc_bridge import DEFAULT_VEHICLE_ID, MccBridgeClient, format_countdown, pa
 VEHICLES = {
     "SLS Block 1": {
         "vehicle_id": DEFAULT_VEHICLE_ID,
-        "description": "Space Launch System Block 1 with Orion pad countdown integration.",
+        "description": "Space Launch System Block 1 with Orion pad countdown and tower handoff integration.",
     }
 }
 TARGET_BODY_OPTIONS = ("Earth", "Moon")
@@ -341,9 +341,9 @@ class NasaMccApp(tk.Tk):
         self.command_status_var = tk.StringVar(value="Bridge ready.")
         self.summary_vars = {
             "vehicle": tk.StringVar(value="SLS Block 1"),
-            "tower_mode": tk.StringVar(value="Awaiting tower"),
+            "tower_mode": tk.StringVar(value="Awaiting tower command"),
             "countdown": tk.StringVar(value="T-00:00:00"),
-            "vehicle_mode": tk.StringVar(value="Awaiting vehicle"),
+            "vehicle_mode": tk.StringVar(value="Awaiting tower handoff"),
             "operator": tk.StringVar(value="READY"),
             "readiness": tk.StringVar(value="Awaiting diagnostics"),
             "bridge": tk.StringVar(value=str(base_dir)),
@@ -440,7 +440,7 @@ class NasaMccApp(tk.Tk):
         ttk.Label(hero, text="NASA MCC APP", style="Header.TLabel").grid(row=1, column=0, pady=(0, 10))
         ttk.Label(
             hero,
-            text="Mission control hub for kOS countdown operations, telemetry windows, and operator interventions.",
+            text="Mission control hub for tower-command countdown operations, telemetry windows, and operator interventions.",
             style="Body.TLabel",
             wraplength=720,
             justify="center",
@@ -537,7 +537,7 @@ class NasaMccApp(tk.Tk):
         text_block = ttk.Frame(title_block, style="Shell.TFrame")
         text_block.grid(row=0, column=1, sticky="w")
         ttk.Label(text_block, text=f"{self.selected_vehicle_name.get()} Mission Control", style="Header.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(text_block, text="Pad operations and countdown authority", style="Body.TLabel").grid(row=1, column=0, sticky="w")
+        ttk.Label(text_block, text="Tower command authority; the vehicle waits for handoff", style="Body.TLabel").grid(row=1, column=0, sticky="w")
 
         top_status = ttk.Frame(shell, style="Panel.TFrame", padding=18)
         top_status.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 14))
@@ -630,14 +630,14 @@ class NasaMccApp(tk.Tk):
         buttons.grid(row=7, column=0, sticky="ew", pady=(16, 0))
         buttons.columnconfigure(0, weight=1)
         buttons.columnconfigure(1, weight=1)
-        ttk.Button(buttons, text="Apply Count", command=self.send_set_countdown, style="Accent.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(buttons, text="Apply Tower Count", command=self.send_set_countdown, style="Accent.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
         ttk.Button(buttons, text="Add Data Window", command=lambda: self.add_data_card(None), style="Panel.TButton").grid(row=0, column=1, sticky="ew")
 
         action_row = ttk.Frame(parent, style="Panel.TFrame")
         action_row.grid(row=8, column=0, sticky="ew", pady=(12, 0))
         action_row.columnconfigure(0, weight=1)
         action_row.columnconfigure(1, weight=1)
-        ttk.Button(action_row, text="Start Countdown", command=self.send_start_countdown, style="Accent.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(action_row, text="Arm Tower", command=self.send_start_countdown, style="Accent.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
         ttk.Button(action_row, text="Abort", command=self.send_abort, style="Danger.TButton").grid(row=0, column=1, sticky="ew")
 
         hold_row = ttk.Frame(parent, style="Panel.TFrame")
@@ -1011,7 +1011,7 @@ class NasaMccApp(tk.Tk):
         self.dispatch_command("resume")
 
     def send_start_countdown(self) -> None:
-        if not self.ensure_tower_online("Start Countdown"):
+        if not self.ensure_tower_online("Arm Tower"):
             return
         target_body = self.target_body_var.get()
         launch_window_mode = self.resolve_launch_window_mode(target_body)
@@ -1034,7 +1034,7 @@ class NasaMccApp(tk.Tk):
         self.dispatch_command("abort")
 
     def send_set_countdown(self) -> None:
-        if not self.ensure_tower_online("Apply Count"):
+        if not self.ensure_tower_online("Apply Tower Count"):
             return
         try:
             countdown_seconds = parse_countdown_to_seconds(self.countdown_var.get())
@@ -1053,7 +1053,13 @@ class NasaMccApp(tk.Tk):
     ) -> None:
         vehicle_id = VEHICLES[self.selected_vehicle_name.get()]["vehicle_id"]
         payload = self.bridge.send_command(command_name, vehicle_id, countdown_seconds, target_body, launch_window_mode)
-        command_text = command_name.replace("_", " ").upper()
+        command_text = {
+            "start_countdown": "ARM TOWER",
+            "set_countdown": "ARM TOWER COUNT",
+            "hold": "HOLD TOWER",
+            "resume": "RESUME TOWER",
+            "abort": "ABORT",
+        }.get(command_name, command_name.replace("_", " ").upper())
         if countdown_seconds is not None:
             command_text = f"{command_text} {format_countdown(countdown_seconds)}"
         if target_body:
@@ -1116,7 +1122,7 @@ class NasaMccApp(tk.Tk):
         elif self.flight_online:
             vehicle_mode_text = str(flight.get("mode", flight.get("status", "logging")))
         elif not self.vehicle_session_active:
-            vehicle_mode_text = "Awaiting countdown"
+            vehicle_mode_text = "Awaiting tower handoff"
         else:
             vehicle_mode_text = "Vehicle telemetry stale"
         self.summary_vars["vehicle_mode"].set(vehicle_mode_text)
@@ -1127,7 +1133,7 @@ class NasaMccApp(tk.Tk):
             operator_text = str(tower.get("operator_status_text", "READY"))
         self.summary_vars["operator"].set(operator_text)
         if not self.vehicle_session_active:
-            readiness_text = "Awaiting countdown"
+            readiness_text = "Awaiting tower handoff"
         else:
             readiness_text = str(vehicle.get("readiness_summary_text", vehicle.get("readiness_status_text", "Awaiting diagnostics")))
             vehicle_mode_value = str(vehicle.get("mode", vehicle.get("status", "online")))
@@ -1135,7 +1141,7 @@ class NasaMccApp(tk.Tk):
                 readiness_text = f"Snapshot: {readiness_text}"
         self.summary_vars["readiness"].set(readiness_text)
         if not self.tower_online:
-            self.command_status_var.set("Tower script is offline. Start tower_main.ks via AG6/boot before using app countdown control.")
+            self.command_status_var.set("Tower script is offline. Start tower_main.ks via AG6/boot before using app tower control.")
 
     @staticmethod
     def resolve_launch_window_mode(target_body: str) -> str:
@@ -1292,7 +1298,7 @@ class NasaMccApp(tk.Tk):
                 return primary_clock
 
         if self.is_vehicle_field(key) and not self.vehicle_session_active:
-            return "Awaiting countdown"
+            return "Awaiting tower handoff"
 
         if key.endswith("formatted_event_time"):
             if source_name == "vehicle_flight":
@@ -1305,7 +1311,7 @@ class NasaMccApp(tk.Tk):
                 return self.last_known_values.get(key, "N/A")
 
             if not self.vehicle_session_active:
-                return "Awaiting countdown"
+                return "Awaiting tower handoff"
             vehicle_event_time = self.current_bundle.get("vehicle", {}).get("formatted_event_time", flattened_data.get(key, "N/A"))
             if not self.is_missing_value(vehicle_event_time):
                 self.last_known_values[key] = vehicle_event_time
@@ -1315,7 +1321,7 @@ class NasaMccApp(tk.Tk):
         current_value = flattened_data.get(key, "N/A")
         if self.is_missing_value(current_value):
             if self.is_vehicle_field(key) and not self.vehicle_session_active:
-                return "Awaiting countdown"
+                return "Awaiting tower handoff"
             return self.last_known_values.get(key, "N/A")
 
         self.last_known_values[key] = current_value
@@ -1350,7 +1356,7 @@ class NasaMccApp(tk.Tk):
 
         messagebox.showwarning(
             "Tower Offline",
-            f"{action_name} requires the tower script to be running.\n\nStart the tower via AG6 or its boot script first.",
+            f"{action_name} requires the tower script to be running.\n\nStart the tower via AG6 or its boot script first. The vehicle waits for tower handoff.",
         )
         return False
 

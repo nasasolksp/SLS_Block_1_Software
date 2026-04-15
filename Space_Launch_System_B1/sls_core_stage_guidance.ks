@@ -13,6 +13,8 @@ GLOBAL FUNCTION FlyAscentGuidance {
     LOCAL boosterPeakThrusts TO InitializeBoosterPeakThrusts(resolvedManifest).
     LOCAL lastDisplayMode TO "".
     LOCAL abortJettisonComplete TO FALSE.
+    LOCAL fairingPanelsDeployed TO FALSE.
+    LOCAL fairingPanelsTelemetryText TO "FAIRING PANELS: PENDING".
 
     UNTIL FALSE {
     // The first stage follows a shallow, shuttle-like ascent:
@@ -35,6 +37,15 @@ GLOBAL FUNCTION FlyAscentGuidance {
             // safe jettison window.
             ExecuteAbortJettisonSequence(resolvedManifest).
             SET abortJettisonComplete TO TRUE.
+        }.
+
+        IF boostersSeparated AND NOT fairingPanelsDeployed AND SHIP:ALTITUDE >= 150000 {
+            // Deploy the Orion fairing panels once we are above 150 km.
+            // This is intentionally independent of the abort-jettison timing
+            // so the deploy cannot be held up by a separate sequence.
+            ExecuteManifestGroup(resolvedManifest["orion_fairing_panels"]).
+            SET fairingPanelsDeployed TO TRUE.
+            SET fairingPanelsTelemetryText TO "FAIRING PANELS: DEPLOYED".
         }.
 
         LOCAL completionStatus TO GetStageOneCompletionStatus(
@@ -100,7 +111,8 @@ GLOBAL FUNCTION FlyAscentGuidance {
             orbitSettings["target_apoapsis"],
             GetStageOneMinimumHandoffEta(ascentSettings, stagingSettings),
             SHIP:APOAPSIS,
-            coreEngineCount
+            coreEngineCount,
+            fairingPanelsTelemetryText
         ).
 
         WriteVehicleBridgeStatus(
@@ -266,7 +278,7 @@ FUNCTION ComputeAscentThrottle {
 }.
 
 FUNCTION DisplayAscentStatus {
-    PARAMETER missionSettings, phaseLabel, guidanceText, targetPitch, targetHeading, targetThrottle, targetApoapsisValue, handoffEtaTarget, guidanceApoapsisValue, coreEngineCount.
+    PARAMETER missionSettings, phaseLabel, guidanceText, targetPitch, targetHeading, targetThrottle, targetApoapsisValue, handoffEtaTarget, guidanceApoapsisValue, coreEngineCount, fairingPanelsTelemetryText.
 
     DrawLine("SLS MAIN", 0).
     DrawLine("Mode: ASCENT GUIDANCE", 1).
@@ -286,6 +298,7 @@ FUNCTION DisplayAscentStatus {
     DrawLine("ETA Apoapsis: " + ROUND(ETA:APOAPSIS, 1), 15).
     DrawLine("Core Engines Alive: " + coreEngineCount, 16).
     DrawLine("Guidance Mode: " + guidanceText, 17).
+    DrawLine(fairingPanelsTelemetryText, 18).
 }.
 
 FUNCTION LimitPitchCommand {

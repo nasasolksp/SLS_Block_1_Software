@@ -1,4 +1,4 @@
-# NASA MCC APP
+﻿# NASA MCC APP
 
 Python mission-control frontend for the kOS SLS countdown flow.
 
@@ -12,10 +12,17 @@ Python mission-control frontend for the kOS SLS countdown flow.
 - Switches between a telemetry window page and a visual flight-data page.
 - Reads the flight-data snapshot and log from `../MCC_Interface/vehicle_flight.txt` and `../MCC_Interface/vehicle_flight_log.csv` when the data CPU is running.
 - Lets the operator:
-  - hold the count
-  - resume the count
-  - set a new countdown time
+  - hold the tower countdown
+  - resume the tower countdown
+  - arm or re-arm the tower countdown
 - Supports addable telemetry cards and detachable data windows.
+
+## Launch Model
+
+- The tower is the source of truth for launch timing.
+- AG6 arms the tower, not the vehicle.
+- The vehicle waits for the tower handoff before terminal count begins.
+- The app can queue tower commands, but it does not start the vehicle directly.
 
 ## Build to EXE
 
@@ -38,7 +45,7 @@ python .\app.py
 ## Integration notes
 
 - `SLS_Launch_Tower/tower_main.ks` reads operator commands and writes tower status.
-- `Space_Launch_System_B1/SLS_Main.ks` reads operator commands during standby and terminal count, and writes vehicle status.
+- `Space_Launch_System_B1/SLS_Main.ks` waits for the tower handoff, then reads operator commands during standby and terminal count, and writes vehicle status.
 - `Space_Launch_System_B1/SLS_Data_CPU.ks` runs on the separate flight-data core and writes `vehicle_flight.txt` plus `vehicle_flight_log.csv`.
 - `Space_Launch_System_B1/SLS_Data_CPU_boot.ks` is a boot helper for that core. It waits for ship unpack before starting the logger. Copy its contents into the data CPU's local `boot.ks` if you want it to auto-start with the vessel.
 - `MCC_Interface/mcc_bridge.ks` is the shared kOS bridge helper.
