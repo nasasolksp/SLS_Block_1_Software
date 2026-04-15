@@ -334,6 +334,7 @@ class NasaMccApp(tk.Tk):
         base_dir = Path(__file__).resolve().parent.parent / "MCC_Interface"
         self.bridge = MccBridgeClient(base_dir)
         self.flight_log_path = self.bridge.paths.vehicle_flight_log_path
+        self.forecast_path = self.bridge.paths.vehicle_launch_forecast_path
 
         self.selected_vehicle_name = tk.StringVar(value="SLS Block 1")
         self.target_body_var = tk.StringVar(value="Earth")
@@ -373,8 +374,10 @@ class NasaMccApp(tk.Tk):
         self.last_flight_updated_at: str = ""
         self.last_flight_seen_at: float = 0.0
         self.flight_log_points: list[dict[str, float]] = []
+        self.launch_forecast_rows: list[dict[str, Any]] = []
         self.visual_summary_vars = {
             "status": tk.StringVar(value="Awaiting flight data"),
+            "route": tk.StringVar(value="No forecast loaded"),
             "altitude": tk.StringVar(value="0 m"),
             "downrange": tk.StringVar(value="0 m"),
             "speed": tk.StringVar(value="0 m/s"),
@@ -699,11 +702,23 @@ class NasaMccApp(tk.Tk):
         self.workspace_canvas.bind("<Configure>", self.on_workspace_canvas_configure)
 
     def build_visual_page(self, parent: ttk.Frame) -> None:
-        parent.rowconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
         parent.columnconfigure(0, weight=1)
 
+        summary_shell = ttk.Frame(parent, style="Panel.TFrame", padding=12)
+        summary_shell.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        for column in range(6):
+            summary_shell.columnconfigure(column, weight=1, uniform="visual")
+
+        self.build_top_summary_item(summary_shell, 0, "Status", self.visual_summary_vars["status"])
+        self.build_top_summary_item(summary_shell, 1, "Route", self.visual_summary_vars["route"])
+        self.build_top_summary_item(summary_shell, 2, "Altitude", self.visual_summary_vars["altitude"])
+        self.build_top_summary_item(summary_shell, 3, "Downrange", self.visual_summary_vars["downrange"])
+        self.build_top_summary_item(summary_shell, 4, "Delta-v / Speed", self.visual_summary_vars["speed"])
+        self.build_top_summary_item(summary_shell, 5, "Samples", self.visual_summary_vars["samples"])
+
         graph_shell = ttk.Frame(parent, style="Panel.TFrame", padding=12)
-        graph_shell.grid(row=0, column=0, sticky="nsew")
+        graph_shell.grid(row=1, column=0, sticky="nsew")
         graph_shell.rowconfigure(0, weight=1)
         graph_shell.columnconfigure(0, weight=1)
 
@@ -727,25 +742,54 @@ class NasaMccApp(tk.Tk):
 
     def refresh_visual_page(self) -> None:
         flight_data = self.current_bundle.get("vehicle_flight", {})
-        points = self.load_flight_log_points()
+        flight_points = self.load_flight_log_points()
+        forecast_rows = self.load_launch_forecast_rows()
 
-        if points:
-            latest_point = points[-1]
+        if self.flight_online and flight_points:
+            latest_point = flight_points[-1]
             status_text = str(flight_data.get("status", "Logging")).replace("_", " ").upper()
-            if not self.flight_online:
-                status_text = "LAST FLIGHT"
             self.visual_summary_vars["status"].set(status_text)
+            self.visual_summary_vars["route"].set("Live flight log")
             self.visual_summary_vars["altitude"].set(self.format_distance_label(latest_point.get("altitude_m", 0.0)))
             self.visual_summary_vars["downrange"].set(self.format_distance_label(latest_point.get("downrange_m", 0.0)))
             self.visual_summary_vars["speed"].set(self.format_speed_label(latest_point.get("surface_speed_mps", 0.0)))
-        else:
-            status_text = str(flight_data.get("status", "Awaiting flight data")).replace("_", " ").strip()
-            self.visual_summary_vars["status"].set(status_text.title())
-            self.visual_summary_vars["altitude"].set(self.format_distance_label(flight_data.get("altitude", 0.0)))
-            self.visual_summary_vars["downrange"].set(self.format_distance_label(flight_data.get("downrange_distance_m", 0.0)))
-            self.visual_summary_vars["speed"].set(self.format_speed_label(flight_data.get("surface_speed", 0.0)))
+            self.visual_summary_vars["samples"].set(f"{len(flight_points)} samples")
+            self.flight_log_points = flight_points
+            if hasattr(self, "flight_graph_canvas"):
+                self.draw_flight_graph(flight_points)
+            return
 
-        self.visual_summary_vars["samples"].set(f"{len(points)} samples")
+        self.launch_forecast_rows = forecast_rows
+        points: list[dict[str, float]] = []
+
+        if forecast_rows:
+            latest_row = forecast_rows[-1]
+            points = self.parse_launch_forecast_points(str(latest_row.get("route_points", "")))
+            status_text = str(latest_row.get("route_status", "FORECAST")).replace("_", " ").upper()
+            self.visual_summary_vars["status"].set(status_text)
+            self.visual_summary_vars["route"].set(str(latest_row.get("route_name", "No forecast route")))
+            self.visual_summary_vars["altitude"].set(self.format_distance_label(latest_row.get("predicted_altitude_m", 0.0)))
+            self.visual_summary_vars["downrange"].set(self.format_distance_label(latest_row.get("predicted_downrange_m", 0.0)))
+            self.visual_summary_vars["speed"].set(self.format_speed_label(latest_row.get("estimated_delta_v_mps", 0.0)))
+            self.visual_summary_vars["samples"].set(f"{len(points)} route points")
+        else:
+            if flight_points:
+                latest_point = flight_points[-1]
+                self.visual_summary_vars["status"].set("LAST FLIGHT")
+                self.visual_summary_vars["route"].set("Archived flight log")
+                self.visual_summary_vars["altitude"].set(self.format_distance_label(latest_point.get("altitude_m", 0.0)))
+                self.visual_summary_vars["downrange"].set(self.format_distance_label(latest_point.get("downrange_m", 0.0)))
+                self.visual_summary_vars["speed"].set(self.format_speed_label(latest_point.get("surface_speed_mps", 0.0)))
+                self.visual_summary_vars["samples"].set(f"{len(flight_points)} samples")
+                points = flight_points
+            else:
+                status_text = str(flight_data.get("status", "Awaiting flight data")).replace("_", " ").strip()
+                self.visual_summary_vars["status"].set(status_text.title())
+                self.visual_summary_vars["route"].set("Awaiting launch forecast")
+                self.visual_summary_vars["altitude"].set(self.format_distance_label(flight_data.get("altitude", 0.0)))
+                self.visual_summary_vars["downrange"].set(self.format_distance_label(flight_data.get("downrange_distance_m", 0.0)))
+                self.visual_summary_vars["speed"].set(self.format_speed_label(flight_data.get("surface_speed", 0.0)))
+                self.visual_summary_vars["samples"].set("0 route points")
         self.flight_log_points = points
 
         if hasattr(self, "flight_graph_canvas"):
@@ -781,6 +825,53 @@ class NasaMccApp(tk.Tk):
                     )
         except OSError:
             return []
+
+        return points
+
+    def load_launch_forecast_rows(self) -> list[dict[str, Any]]:
+        if not self.forecast_path.exists():
+            return []
+
+        try:
+            with self.forecast_path.open("r", encoding="utf-8", newline="") as handle:
+                reader = csv.DictReader(handle)
+                rows: list[dict[str, Any]] = []
+                for row in reader:
+                    if not row:
+                        continue
+                    rows.append(row)
+        except OSError:
+            return []
+
+        return rows
+
+    def parse_launch_forecast_points(self, route_points_text: str) -> list[dict[str, float]]:
+        points: list[dict[str, float]] = []
+        if not route_points_text.strip():
+            return points
+
+        for raw_pair in route_points_text.split(";"):
+            if "|" not in raw_pair:
+                continue
+            downrange_text, altitude_text = raw_pair.split("|", 1)
+            downrange_m = self.safe_float(downrange_text)
+            altitude_m = self.safe_float(altitude_text)
+            if downrange_m is None or altitude_m is None:
+                continue
+            points.append(
+                {
+                    "sample_index": float(len(points)),
+                    "mission_elapsed_seconds": 0.0,
+                    "altitude_m": altitude_m,
+                    "downrange_m": downrange_m,
+                    "vertical_speed_mps": 0.0,
+                    "surface_speed_mps": 0.0,
+                    "apoapsis_m": 0.0,
+                    "periapsis_m": 0.0,
+                    "latitude_deg": 0.0,
+                    "longitude_deg": 0.0,
+                }
+            )
 
         return points
 

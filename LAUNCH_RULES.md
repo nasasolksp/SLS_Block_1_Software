@@ -220,6 +220,8 @@ These values are hard-coded or defaulted in the current launch stack:
 - tower handoff lead time: `120 s`
 - core ignition readiness check: `0.5 s` before launch
 - tower clear altitude: `250 m`
+- forecast checkpoint interval: `300 s`
+- forecast final checkpoint: `20 s`
 - max-q start altitude: `9000 m`
 - max-q end altitude: `17000 m`
 - max-q throttle cap: `0.72`

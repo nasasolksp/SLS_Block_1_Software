@@ -35,6 +35,10 @@ class BridgePaths:
     def vehicle_flight_log_path(self) -> Path:
         return self.base_dir / "vehicle_flight_log.csv"
 
+    @property
+    def vehicle_launch_forecast_path(self) -> Path:
+        return self.base_dir / "vehicle_launch_forecast.csv"
+
 
 class MccBridgeClient:
     def __init__(self, base_dir: Path) -> None:
@@ -88,6 +92,12 @@ class MccBridgeClient:
             self._atomic_write_text(
                 self.paths.vehicle_flight_log_path,
                 "sample_index,mission_elapsed_seconds,altitude_m,downrange_m,vertical_speed_mps,surface_speed_mps,apoapsis_m,periapsis_m,latitude_deg,longitude_deg\n",
+            )
+
+        if not self.paths.vehicle_launch_forecast_path.exists():
+            self._atomic_write_text(
+                self.paths.vehicle_launch_forecast_path,
+                "sample_index,checkpoint_seconds_to_launch,checkpoint_label,mission_elapsed_seconds,route_name,launch_heading_deg,pitchover_start_altitude_m,pitchover_end_altitude_m,gravity_turn_final_pitch_deg,gravity_turn_end_altitude_m,estimated_delta_v_mps,predicted_downrange_m,predicted_altitude_m,predicted_apoapsis_m,predicted_periapsis_m,route_points\n",
             )
 
     def read_bundle(self) -> dict[str, Any]:

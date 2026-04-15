@@ -5,11 +5,13 @@ GLOBAL FUNCTION GetMccBridgePaths {
         "vehicle_status_archive_path", "0:/NASA/MCC_Interface/vehicle_status.txt",
         "vehicle_flight_status_archive_path", "0:/NASA/MCC_Interface/vehicle_flight.txt",
         "vehicle_flight_log_archive_path", "0:/NASA/MCC_Interface/vehicle_flight_log.csv",
+        "vehicle_launch_forecast_archive_path", "0:/NASA/MCC_Interface/vehicle_launch_forecast.csv",
         "command_volume_path", "/NASA/MCC_Interface/command.txt",
         "tower_status_volume_path", "/NASA/MCC_Interface/tower_status.txt",
         "vehicle_status_volume_path", "/NASA/MCC_Interface/vehicle_status.txt",
         "vehicle_flight_status_volume_path", "/NASA/MCC_Interface/vehicle_flight.txt",
-        "vehicle_flight_log_volume_path", "/NASA/MCC_Interface/vehicle_flight_log.csv"
+        "vehicle_flight_log_volume_path", "/NASA/MCC_Interface/vehicle_flight_log.csv",
+        "vehicle_launch_forecast_volume_path", "/NASA/MCC_Interface/vehicle_launch_forecast.csv"
     ).
 }.
 
@@ -110,6 +112,13 @@ GLOBAL FUNCTION WriteMccVehicleFlightLog {
 
     LOCAL bridgePaths TO GetMccBridgePaths().
     WriteBridgeTextFile(logLines, bridgePaths["vehicle_flight_log_archive_path"], bridgePaths["vehicle_flight_log_volume_path"]).
+}.
+
+GLOBAL FUNCTION WriteMccVehicleLaunchForecast {
+    PARAMETER logLines.
+
+    LOCAL bridgePaths TO GetMccBridgePaths().
+    WriteBridgeTextFile(logLines, bridgePaths["vehicle_launch_forecast_archive_path"], bridgePaths["vehicle_launch_forecast_volume_path"]).
 }.
 
 GLOBAL FUNCTION ReadBridgeRecord {

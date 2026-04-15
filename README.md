@@ -72,6 +72,12 @@ RUNPATH("0:/NASA/Space_Launch_System_B1/SLS_Main.ks").
 
 If you are using the separate flight-data CPU, copy the contents of `Space_Launch_System_B1/SLS_Data_CPU_boot.ks` into that CPU's local `boot.ks`.
 
+The data CPU also writes a prelaunch forecast CSV:
+
+- `MCC_Interface/vehicle_launch_forecast.csv`
+
+During countdown that file is refreshed with the current best launch profile and a sampled route preview. It is a deterministic forecast, not live flight telemetry. The MCC app uses it before liftoff and then switches to `vehicle_flight_log.csv` after launch.
+
 ### 3. Install the MCC app if you want remote control
 
 If you want tower commands and telemetry routed through the GUI, run the Python app in:
