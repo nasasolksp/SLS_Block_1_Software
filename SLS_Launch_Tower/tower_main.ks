@@ -38,6 +38,7 @@ FUNCTION RunCountdown {
     LOCAL vehicleId TO launchSettings["vehicle_id"].
     LOCAL lastDisplayMode TO "".
     LOCAL useMccApp TO missionSettings["use_mcc_app"].
+    LOCAL launchRuleGateRequired TO FALSE.
 
     CLEARSCREEN.
 
@@ -52,6 +53,7 @@ FUNCTION RunCountdown {
         SET launchEpochSeconds TO countdownInitialization["launch_epoch_seconds"].
         SET heldCountdownSeconds TO countdownInitialization["held_countdown_seconds"].
         SET countdownArmed TO countdownInitialization["countdown_armed"].
+        SET launchRuleGateRequired TO (launchEpochSeconds - TIME:SECONDS) > 3600.
         SET countdownHoldActive TO FALSE.
         SET abortActive TO FALSE.
         SET operatorStatusText TO "LOCAL COUNTDOWN ACTIVE".
@@ -88,6 +90,7 @@ FUNCTION RunCountdown {
                 SET operatorStatusText TO operatorUpdate["operator_status_text"].
                 SET selectedTargetBodyName TO operatorUpdate["target_body"].
                 SET selectedLaunchWindowMode TO operatorUpdate["launch_window_mode"].
+                SET launchRuleGateRequired TO operatorUpdate["launch_rule_gate_required"].
                 SET targetBody TO BODY(selectedTargetBodyName).
                 SET hasCachedWindowSolution TO FALSE.
             }.
@@ -139,6 +142,10 @@ FUNCTION RunCountdown {
         // Publish the handoff in both modes. The vehicle waits for this
         // message before arming its own launch sequence, so the tower is the
         // source of truth for launch start.
+        IF countdownArmed AND NOT abortActive AND NOT countdownHoldActive AND secondsToWindow > 3600 {
+            SET launchRuleGateRequired TO TRUE.
+        }.
+
         IF countdownArmed AND NOT abortActive AND NOT countdownHoldActive AND NOT handoffComplete AND secondsToWindow <= handoffTimeSeconds {
             IF SendTowerHandoff(launchSettings, launchEpochSeconds, windowLongitude) {
                 SET handoffComplete TO TRUE.
@@ -186,7 +193,8 @@ FUNCTION RunCountdown {
             operatorStatusText,
             launchEpochSeconds,
             countdownArmed,
-            abortActive
+            abortActive,
+            launchRuleGateRequired
         ).
 
         WAIT refreshRate.
@@ -245,6 +253,7 @@ FUNCTION ApplyTowerOperatorCommand {
     LOCAL updatedHoldActive TO countdownHoldActive.
     LOCAL updatedAbortActive TO abortActive.
     LOCAL updatedHeldCountdownSeconds TO heldCountdownSeconds.
+    LOCAL updatedLaunchRuleGateRequired TO FALSE.
     LOCAL updatedTargetBodyName TO currentTargetBodyName.
     LOCAL updatedLaunchWindowMode TO currentLaunchWindowMode.
     LOCAL operatorStatusText TO "AWAITING START".
@@ -264,6 +273,7 @@ FUNCTION ApplyTowerOperatorCommand {
         SET updatedLaunchEpochSeconds TO countdownInitialization["launch_epoch_seconds"].
         SET updatedHeldCountdownSeconds TO countdownInitialization["held_countdown_seconds"].
         SET updatedCountdownArmed TO countdownInitialization["countdown_armed"].
+        SET updatedLaunchRuleGateRequired TO (updatedLaunchEpochSeconds - TIME:SECONDS) > 3600.
         SET updatedHoldActive TO FALSE.
         SET updatedAbortActive TO FALSE.
         SET operatorStatusText TO countdownInitialization["operator_status_text"].
@@ -283,20 +293,19 @@ FUNCTION ApplyTowerOperatorCommand {
         } ELSE {
             SET updatedCountdownMode TO ResolveCountdownModeFromSelection(updatedLaunchWindowMode, updatedTargetBodyName, SHIP:BODY).
             SET updatedCountdownArmed TO TRUE.
+            SET updatedLaunchRuleGateRequired TO operatorCommand["countdown_seconds"] > 3600.
             SET updatedHoldActive TO FALSE.
             SET updatedAbortActive TO FALSE.
 
             IF updatedCountdownMode = "MANUAL_COUNTDOWN" {
-                IF countdownHoldActive {
-                    SET updatedHeldCountdownSeconds TO operatorCommand["countdown_seconds"].
-                    SET updatedLaunchEpochSeconds TO TIME:SECONDS + operatorCommand["countdown_seconds"].
-                } ELSE {
-                    SET updatedLaunchEpochSeconds TO TIME:SECONDS + operatorCommand["countdown_seconds"].
-                    SET updatedHeldCountdownSeconds TO operatorCommand["countdown_seconds"].
-                }.
+                SET updatedLaunchEpochSeconds TO TIME:SECONDS + operatorCommand["countdown_seconds"].
+                SET updatedHeldCountdownSeconds TO operatorCommand["countdown_seconds"].
                 SET operatorStatusText TO "COUNTDOWN STARTED AT " + FormatCountdown(operatorCommand["countdown_seconds"]).
             } ELSE {
-                SET updatedHeldCountdownSeconds TO operatorCommand["countdown_seconds"].
+                LOCAL countdownInitialization TO InitializeCountdownFromCommand(updatedCountdownMode, updatedLaunchEpochSeconds, missionSettings, updatedTargetBodyName).
+                SET updatedCountdownMode TO countdownInitialization["countdown_mode"].
+                SET updatedLaunchEpochSeconds TO countdownInitialization["launch_epoch_seconds"].
+                SET updatedHeldCountdownSeconds TO countdownInitialization["held_countdown_seconds"].
                 SET operatorStatusText TO "WINDOWED COUNTDOWN ARMED FOR " + updatedTargetBodyName.
             }.
         }.
@@ -314,6 +323,7 @@ FUNCTION ApplyTowerOperatorCommand {
         "countdown_hold_active", updatedHoldActive,
         "abort_active", updatedAbortActive,
         "held_countdown_seconds", updatedHeldCountdownSeconds,
+        "launch_rule_gate_required", updatedLaunchRuleGateRequired,
         "operator_status_text", operatorStatusText,
         "target_body", updatedTargetBodyName,
         "launch_window_mode", updatedLaunchWindowMode
@@ -368,7 +378,7 @@ FUNCTION InitializeCountdownFromCommand {
 }.
 
 FUNCTION WriteTowerBridgeStatus {
-    PARAMETER missionSettings, launchSettings, selectedTargetBodyName, countdownMode, modeStatusText, siteLatitude, siteLongitude, windowLongitude, relativeInclination, secondsToWindow, handoffComplete, countdownHoldActive, operatorStatusText, launchEpochSeconds, countdownArmed, abortActive.
+    PARAMETER missionSettings, launchSettings, selectedTargetBodyName, countdownMode, modeStatusText, siteLatitude, siteLongitude, windowLongitude, relativeInclination, secondsToWindow, handoffComplete, countdownHoldActive, operatorStatusText, launchEpochSeconds, countdownArmed, abortActive, launchRuleGateRequired.
 
     WriteMccTowerStatus(
         LEXICON(
@@ -380,6 +390,7 @@ FUNCTION WriteTowerBridgeStatus {
             "countdown_mode", countdownMode,
             "mode_status_text", modeStatusText,
             "countdown_armed", countdownArmed,
+            "launch_rule_gate_required", launchRuleGateRequired,
             "countdown_hold_active", countdownHoldActive,
             "abort_active", abortActive,
             "operator_status_text", operatorStatusText,
@@ -401,7 +412,7 @@ FUNCTION SendTowerHandoff {
 
     WriteMccCommand(
         LEXICON(
-            "command_revision", TIME:SECONDS,
+            "command_revision", ROUND(TIME:SECONDS, 0),
             "vehicle_id", launchSettings["vehicle_id"],
             "command", "tower_handoff",
             "countdown_seconds", MAX(0, launchEpochSeconds - TIME:SECONDS),

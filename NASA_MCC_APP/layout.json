@@ -3,42 +3,42 @@
     {
       "card_id": "card_0",
       "field": "tower.formatted_countdown",
-      "x": 12,
+      "x": 41,
       "y": 12,
-      "width": 392,
-      "height": 282
+      "width": 321,
+      "height": 120
     },
     {
       "card_id": "card_1",
       "field": "tower.operator_status_text",
-      "x": 393,
-      "y": 20,
-      "width": 392,
-      "height": 282
+      "x": 390,
+      "y": 12,
+      "width": 320,
+      "height": 139
     },
     {
       "card_id": "card_2",
       "field": "vehicle.mode",
-      "x": 772,
+      "x": 763,
       "y": 12,
-      "width": 392,
-      "height": 282
+      "width": 320,
+      "height": 180
     },
     {
       "card_id": "card_3",
       "field": "vehicle.altitude",
-      "x": 94,
-      "y": 274,
-      "width": 445,
-      "height": 293
+      "x": 23,
+      "y": 208,
+      "width": 320,
+      "height": 180
     },
     {
       "card_id": "card_0",
-      "field": "vehicle_status.readiness_target_orbit_speed_mps",
-      "x": 637,
-      "y": 232,
-      "width": 392,
-      "height": 282
+      "field": "launch_rule_check.readiness_target_orbit_speed_mps",
+      "x": 362,
+      "y": 210,
+      "width": 453,
+      "height": 181
     }
   ]
 }

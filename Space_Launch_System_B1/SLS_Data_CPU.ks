@@ -109,7 +109,7 @@ UNTIL FALSE {
 
     LOCAL towerStatus TO ReadBridgeRecord(bridgePaths["tower_status_archive_path"], bridgePaths["tower_status_volume_path"]).
 
-    IF IsLaunchForecastCountdownActive(towerStatus) AND IsResolvedManifestValid(resolvedManifest) {
+    IF IsLaunchForecastCountdownActive(towerStatus) {
         LOCAL currentSeconds TO GetTowerCountdownSeconds(towerStatus).
 
         IF NOT forecastState["forecast_active"] {

@@ -127,7 +127,10 @@ GLOBAL FUNCTION FlyAscentGuidance {
             TRUE,
             FALSE,
             FALSE,
-            guidanceText
+            guidanceText,
+            FALSE,
+            FALSE,
+            FALSE
         ).
 
         WAIT guidanceInterval.

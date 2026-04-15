@@ -26,9 +26,9 @@ LAYOUT_STATE_PATH = Path(__file__).resolve().parent / "layout.json"
 
 class DataCard:
     DEFAULT_WIDTH = 392
-    DEFAULT_HEIGHT = 282
+    DEFAULT_HEIGHT = 200
     MIN_WIDTH = 320
-    MIN_HEIGHT = 240
+    MIN_HEIGHT = 120
 
     def __init__(
         self,
@@ -70,13 +70,11 @@ class DataCard:
         self.pos_y = position[1]
         self.width = max(self.MIN_WIDTH, int(self.origin_width))
         self.height = max(self.MIN_HEIGHT, int(self.origin_height))
-        self.selector_widths = {"source": 20, "section": 24, "metric": 24}
-
         self.frame = ttk.Frame(parent, style="TelemetryCard.TFrame", padding=0)
         self.frame.configure(width=self.width, height=self.height)
         self.frame.grid_propagate(False)
         self.frame.columnconfigure(0, weight=1)
-        self.frame.rowconfigure(2, weight=1)
+        self.frame.rowconfigure(1, weight=1)
 
         header = ttk.Frame(self.frame, style="TelemetryCardChrome.TFrame", padding=(14, 12, 14, 10))
         header.grid(row=0, column=0, sticky="ew")
@@ -93,64 +91,52 @@ class DataCard:
         header.bind("<B1-Motion>", self.on_drag_motion)
         header.bind("<ButtonRelease-1>", self.on_drag_release)
 
-        title_block = ttk.Frame(header, style="TelemetryCardChrome.TFrame")
-        title_block.grid(row=0, column=1, sticky="ew")
-        title_block.columnconfigure(0, weight=1)
-        ttk.Label(title_block, text="Telemetry Card", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
-        self.field_label = ttk.Label(
-            title_block,
-            textvariable=self.field_display_var,
-            style="CardField.TLabel",
-            justify="left",
-            wraplength=max(220, self.width - 180),
-        )
-        self.field_label.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        selector_panel = ttk.Frame(header, style="TelemetryCardChrome.TFrame")
+        selector_panel.grid(row=0, column=1, sticky="e", padx=(0, 12))
+        selector_panel.columnconfigure(0, weight=0)
+        selector_panel.columnconfigure(1, weight=0)
+        selector_panel.columnconfigure(2, weight=0)
 
-        action_row = ttk.Frame(header, style="TelemetryCardChrome.TFrame")
-        action_row.grid(row=0, column=2, sticky="e")
-        action_row.columnconfigure(0, weight=1)
-        ttk.Button(action_row, text="Pop Out", command=self.open_popout, style="Panel.TButton").grid(row=0, column=0, padx=(0, 6))
-        ttk.Button(action_row, text="Remove", command=self.remove, style="Danger.TButton").grid(row=0, column=1)
-
-        selector_panel = ttk.Frame(self.frame, style="TelemetryCard.TFrame", padding=(14, 2, 14, 10))
-        selector_panel.grid(row=1, column=0, sticky="ew")
-        selector_panel.columnconfigure(1, weight=1)
-
-        self.source_label = ttk.Label(selector_panel, text="Source", style="CardMetaLabel.TLabel")
-        self.source_label.grid(row=0, column=0, sticky="w", pady=(0, 6), padx=(0, 10))
+        self.source_label = ttk.Label(selector_panel, text="S", style="CardMetaLabel.TLabel")
+        self.source_label.grid(row=0, column=0, sticky="w", padx=(0, 10))
         self.source_button = ttk.Button(
             selector_panel,
             textvariable=self.source_display_var,
             command=lambda: self.open_picker("source"),
             style="CardSelector.TButton",
-            width=10,
+            width=3,
         )
-        self.source_button.grid(row=0, column=1, sticky="ew", pady=(0, 6))
+        self.source_button.grid(row=1, column=0, sticky="w", padx=(0, 10))
 
-        self.section_label = ttk.Label(selector_panel, text="Section", style="CardMetaLabel.TLabel")
-        self.section_label.grid(row=1, column=0, sticky="w", pady=(0, 6), padx=(0, 10))
+        self.section_label = ttk.Label(selector_panel, text="C", style="CardMetaLabel.TLabel")
+        self.section_label.grid(row=0, column=1, sticky="w", padx=(0, 10))
         self.section_button = ttk.Button(
             selector_panel,
             textvariable=self.section_display_var,
             command=lambda: self.open_picker("section"),
             style="CardSelector.TButton",
-            width=14,
+            width=3,
         )
-        self.section_button.grid(row=1, column=1, sticky="ew", pady=(0, 6))
+        self.section_button.grid(row=1, column=1, sticky="w", padx=(0, 10))
 
-        self.metric_label = ttk.Label(selector_panel, text="Metric", style="CardMetaLabel.TLabel")
-        self.metric_label.grid(row=2, column=0, sticky="w", padx=(0, 10))
+        self.metric_label = ttk.Label(selector_panel, text="M", style="CardMetaLabel.TLabel")
+        self.metric_label.grid(row=0, column=2, sticky="w")
         self.metric_button = ttk.Button(
             selector_panel,
             textvariable=self.metric_display_var,
             command=lambda: self.open_picker("metric"),
             style="CardSelector.TButton",
-            width=16,
+            width=4,
         )
-        self.metric_button.grid(row=2, column=1, sticky="ew")
+        self.metric_button.grid(row=1, column=2, sticky="w")
 
-        self.value_panel = ttk.Frame(self.frame, style="TelemetryValue.TFrame", padding=(14, 12, 14, 10))
-        self.value_panel.grid(row=2, column=0, sticky="nsew")
+        action_row = ttk.Frame(header, style="TelemetryCardChrome.TFrame")
+        action_row.grid(row=0, column=2, sticky="e")
+        ttk.Button(action_row, text="Pop Out", command=self.open_popout, style="Panel.TButton").grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(action_row, text="Remove", command=self.remove, style="Danger.TButton").grid(row=0, column=1)
+
+        self.value_panel = ttk.Frame(self.frame, style="TelemetryValue.TFrame", padding=(12, 4, 12, 4))
+        self.value_panel.grid(row=1, column=0, sticky="nsew")
         self.value_panel.columnconfigure(0, weight=1)
         self.value_panel.rowconfigure(0, weight=1)
 
@@ -160,16 +146,16 @@ class DataCard:
             style="TelemetryValue.TLabel",
             anchor="w",
             justify="left",
-            wraplength=max(260, self.width - 34),
+            wraplength=max(220, self.width - 28),
         )
         self.value_label.grid(row=0, column=0, sticky="nsew")
 
-        footer = ttk.Frame(self.frame, style="TelemetryCardChrome.TFrame", padding=(14, 0, 14, 10))
-        footer.grid(row=3, column=0, sticky="ew")
+        footer = ttk.Frame(self.frame, style="TelemetryCardChrome.TFrame", padding=(12, 0, 12, 4))
+        footer.grid(row=2, column=0, sticky="ew")
         footer.columnconfigure(0, weight=1)
         footer.columnconfigure(1, weight=0)
 
-        self.meta_label = ttk.Label(footer, textvariable=self.meta_var, style="CardMetaBody.TLabel", justify="left", wraplength=max(260, self.width - 90))
+        self.meta_label = ttk.Label(footer, textvariable=self.meta_var, style="CardMetaBody.TLabel", justify="left", wraplength=max(220, self.width - 72))
         self.meta_label.grid(row=0, column=0, sticky="w")
         self.resize_handle = ttk.Label(footer, text="↘", style="CardResize.TLabel", cursor="bottom_right_corner")
         self.resize_handle.grid(row=0, column=1, sticky="e")
@@ -177,7 +163,7 @@ class DataCard:
         self.resize_handle.bind("<B1-Motion>", self.on_resize_motion)
         self.resize_handle.bind("<ButtonRelease-1>", self.on_resize_release)
         self.frame.bind("<Configure>", self.on_card_configure)
-        self._bind_drag_targets(self.frame, header, title_block, selector_panel, self.value_panel, footer)
+        self._bind_drag_targets(self.frame, header, selector_panel, self.value_panel, footer)
         self._sync_layout_constraints()
 
     def update_hierarchy(self, field_catalog: dict[str, dict[str, list[str]]], preserve_field: str | None = None) -> None:
@@ -406,11 +392,10 @@ class DataCard:
         self.section_display_var.set(self._abbreviate_segment(current_section))
         self.metric_display_var.set(self._abbreviate_segment(current_metric))
 
-        self._set_selector_width(self.source_button, self.source_display_var.get(), 6, 10)
-        self._set_selector_width(self.section_button, self.section_display_var.get(), 6, 12)
-        self._set_selector_width(self.metric_button, self.metric_display_var.get(), 6, 14)
+        self._set_selector_width(self.source_button, self.source_display_var.get(), 2, 4)
+        self._set_selector_width(self.section_button, self.section_display_var.get(), 2, 4)
+        self._set_selector_width(self.metric_button, self.metric_display_var.get(), 2, 6)
 
-        self.field_label.configure(wraplength=max(180, self.width - 176))
         self.value_label.configure(wraplength=max(240, self.width - 34))
         self.meta_label.configure(wraplength=max(220, self.width - 90))
         self.frame.configure(width=self.width, height=self.height)
@@ -585,6 +570,8 @@ class NasaMccApp(tk.Tk):
         self.flight_log_points: list[dict[str, float]] = []
         self.launch_forecast_rows: list[dict[str, Any]] = []
         self.launch_rule_check_rows: list[dict[str, Any]] = []
+        self.predicted_flight_points: list[dict[str, float]] = []
+        self.launch_rule_gate_started_above_t60 = False
         self.visual_summary_vars = {
             "status": tk.StringVar(value="Awaiting flight data"),
             "route": tk.StringVar(value="No forecast loaded"),
@@ -592,6 +579,14 @@ class NasaMccApp(tk.Tk):
             "downrange": tk.StringVar(value="0 m"),
             "speed": tk.StringVar(value="0 m/s"),
             "samples": tk.StringVar(value="0 samples"),
+        }
+        self.predicted_summary_vars = {
+            "status": tk.StringVar(value="Awaiting forecast"),
+            "route": tk.StringVar(value="No forecast loaded"),
+            "altitude": tk.StringVar(value="0 m"),
+            "downrange": tk.StringVar(value="0 m"),
+            "speed": tk.StringVar(value="0 m/s"),
+            "samples": tk.StringVar(value="0 route points"),
         }
         self.launch_rules_summary_vars = {
             "status": tk.StringVar(value="Awaiting launch rules"),
@@ -624,13 +619,13 @@ class NasaMccApp(tk.Tk):
         self.style.configure("Value.TLabel", background=self.colors["panel_alt"], foreground=self.colors["text"], font=("Consolas", 22, "bold"))
         self.style.configure("HeroCountdown.TLabel", background=self.colors["panel"], foreground=self.colors["text"], font=("Consolas", 34, "bold"))
         self.style.configure("HeroMeta.TLabel", background=self.colors["panel"], foreground=self.colors["muted"], font=("Segoe UI", 11))
-        self.style.configure("CardDrag.TLabel", background="#10263a", foreground=self.colors["gold"], font=("Bahnschrift", 10, "bold"), padding=(8, 4))
-        self.style.configure("CardTitle.TLabel", background="#0b1b2d", foreground=self.colors["gold"], font=("Bahnschrift", 13, "bold"))
-        self.style.configure("CardField.TLabel", background="#0b1b2d", foreground=self.colors["text"], font=("Consolas", 11, "bold"))
-        self.style.configure("CardMetaLabel.TLabel", background="#081625", foreground=self.colors["muted"], font=("Segoe UI", 10, "bold"))
-        self.style.configure("CardMetaBody.TLabel", background="#0b1b2d", foreground=self.colors["muted"], font=("Consolas", 9))
-        self.style.configure("TelemetryValue.TLabel", background="#0d2034", foreground=self.colors["text"], font=("Consolas", 18, "bold"), padding=(0, 0, 0, 0))
-        self.style.configure("CardResize.TLabel", background="#10263a", foreground=self.colors["gold"], font=("Segoe UI", 8, "bold"), padding=(6, 3))
+        self.style.configure("CardDrag.TLabel", background="#10263a", foreground=self.colors["gold"], font=("Bahnschrift", 10, "bold"), padding=(6, 3))
+        self.style.configure("CardTitle.TLabel", background="#0b1b2d", foreground=self.colors["gold"], font=("Bahnschrift", 12, "bold"))
+        self.style.configure("CardField.TLabel", background="#0b1b2d", foreground=self.colors["text"], font=("Consolas", 10, "bold"))
+        self.style.configure("CardMetaLabel.TLabel", background="#081625", foreground=self.colors["muted"], font=("Segoe UI", 8, "bold"))
+        self.style.configure("CardMetaBody.TLabel", background="#0b1b2d", foreground=self.colors["muted"], font=("Consolas", 7))
+        self.style.configure("TelemetryValue.TLabel", background="#0d2034", foreground=self.colors["text"], font=("Consolas", 12, "bold"), padding=(0, 0, 0, 0))
+        self.style.configure("CardResize.TLabel", background="#10263a", foreground=self.colors["gold"], font=("Segoe UI", 8, "bold"), padding=(3, 1))
         self.style.configure("Panel.TButton", background=self.colors["highlight"], foreground=self.colors["text"], borderwidth=0, padding=8)
         self.style.map("Panel.TButton", background=[("active", "#4597bb")])
         self.style.configure("Accent.TButton", background=self.colors["accent"], foreground=self.colors["text"], borderwidth=0, padding=10)
@@ -639,7 +634,7 @@ class NasaMccApp(tk.Tk):
         self.style.map("Danger.TButton", background=[("active", "#93434c")])
         self.style.configure("Panel.TEntry", fieldbackground="#071929", foreground=self.colors["text"], insertcolor=self.colors["text"])
         self.style.configure("Panel.TCombobox", fieldbackground="#071929", foreground=self.colors["text"])
-        self.style.configure("CardSelector.TButton", background="#071929", foreground=self.colors["text"], borderwidth=1, relief="solid", padding=(6, 3), anchor="center")
+        self.style.configure("CardSelector.TButton", background="#071929", foreground=self.colors["text"], borderwidth=1, relief="solid", padding=(2, 0), anchor="center", font=("Consolas", 8, "bold"))
         self.style.map("CardSelector.TButton", background=[("active", "#0b243a")], foreground=[("active", self.colors["text"])])
         self.style.configure("TNotebook", background=self.colors["panel"], borderwidth=0)
         self.style.configure(
@@ -942,34 +937,70 @@ class NasaMccApp(tk.Tk):
         self.workspace_canvas.bind("<Configure>", self.on_workspace_canvas_configure)
 
     def build_visual_page(self, parent: ttk.Frame) -> None:
-        parent.rowconfigure(1, weight=1)
+        parent.rowconfigure(0, weight=1)
         parent.columnconfigure(0, weight=1)
 
-        summary_shell = ttk.Frame(parent, style="Panel.TFrame", padding=12)
-        summary_shell.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        notebook = ttk.Notebook(parent)
+        notebook.grid(row=0, column=0, sticky="nsew")
+
+        actual_tab = ttk.Frame(notebook, style="Panel.TFrame", padding=12)
+        predicted_tab = ttk.Frame(notebook, style="Panel.TFrame", padding=12)
+        notebook.add(actual_tab, text="Actual Flight Path")
+        notebook.add(predicted_tab, text="Predicted Flight Path")
+
+        actual_tab.rowconfigure(1, weight=1)
+        actual_tab.columnconfigure(0, weight=1)
+        actual_summary_shell = ttk.Frame(actual_tab, style="Panel.TFrame", padding=0)
+        actual_summary_shell.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         for column in range(6):
-            summary_shell.columnconfigure(column, weight=1, uniform="visual")
+            actual_summary_shell.columnconfigure(column, weight=1, uniform="visual_actual")
+        self.build_top_summary_item(actual_summary_shell, 0, "Status", self.visual_summary_vars["status"])
+        self.build_top_summary_item(actual_summary_shell, 1, "Route", self.visual_summary_vars["route"])
+        self.build_top_summary_item(actual_summary_shell, 2, "Altitude", self.visual_summary_vars["altitude"])
+        self.build_top_summary_item(actual_summary_shell, 3, "Downrange", self.visual_summary_vars["downrange"])
+        self.build_top_summary_item(actual_summary_shell, 4, "Delta-v / Speed", self.visual_summary_vars["speed"])
+        self.build_top_summary_item(actual_summary_shell, 5, "Samples", self.visual_summary_vars["samples"])
 
-        self.build_top_summary_item(summary_shell, 0, "Status", self.visual_summary_vars["status"])
-        self.build_top_summary_item(summary_shell, 1, "Route", self.visual_summary_vars["route"])
-        self.build_top_summary_item(summary_shell, 2, "Altitude", self.visual_summary_vars["altitude"])
-        self.build_top_summary_item(summary_shell, 3, "Downrange", self.visual_summary_vars["downrange"])
-        self.build_top_summary_item(summary_shell, 4, "Delta-v / Speed", self.visual_summary_vars["speed"])
-        self.build_top_summary_item(summary_shell, 5, "Samples", self.visual_summary_vars["samples"])
-
-        graph_shell = ttk.Frame(parent, style="Panel.TFrame", padding=12)
-        graph_shell.grid(row=1, column=0, sticky="nsew")
-        graph_shell.rowconfigure(0, weight=1)
-        graph_shell.columnconfigure(0, weight=1)
+        actual_graph_shell = ttk.Frame(actual_tab, style="Panel.TFrame", padding=0)
+        actual_graph_shell.grid(row=1, column=0, sticky="nsew")
+        actual_graph_shell.rowconfigure(0, weight=1)
+        actual_graph_shell.columnconfigure(0, weight=1)
 
         self.flight_graph_canvas = tk.Canvas(
-            graph_shell,
+            actual_graph_shell,
             background="#06111d",
             highlightthickness=0,
             borderwidth=0,
         )
         self.flight_graph_canvas.grid(row=0, column=0, sticky="nsew")
         self.flight_graph_canvas.bind("<Configure>", self.on_flight_graph_configure)
+
+        predicted_tab.rowconfigure(1, weight=1)
+        predicted_tab.columnconfigure(0, weight=1)
+        predicted_summary_shell = ttk.Frame(predicted_tab, style="Panel.TFrame", padding=0)
+        predicted_summary_shell.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        for column in range(6):
+            predicted_summary_shell.columnconfigure(column, weight=1, uniform="visual_forecast")
+        self.build_top_summary_item(predicted_summary_shell, 0, "Status", self.predicted_summary_vars["status"])
+        self.build_top_summary_item(predicted_summary_shell, 1, "Route", self.predicted_summary_vars["route"])
+        self.build_top_summary_item(predicted_summary_shell, 2, "Altitude", self.predicted_summary_vars["altitude"])
+        self.build_top_summary_item(predicted_summary_shell, 3, "Downrange", self.predicted_summary_vars["downrange"])
+        self.build_top_summary_item(predicted_summary_shell, 4, "Delta-v / Speed", self.predicted_summary_vars["speed"])
+        self.build_top_summary_item(predicted_summary_shell, 5, "Samples", self.predicted_summary_vars["samples"])
+
+        predicted_graph_shell = ttk.Frame(predicted_tab, style="Panel.TFrame", padding=0)
+        predicted_graph_shell.grid(row=1, column=0, sticky="nsew")
+        predicted_graph_shell.rowconfigure(0, weight=1)
+        predicted_graph_shell.columnconfigure(0, weight=1)
+
+        self.predicted_graph_canvas = tk.Canvas(
+            predicted_graph_shell,
+            background="#06111d",
+            highlightthickness=0,
+            borderwidth=0,
+        )
+        self.predicted_graph_canvas.grid(row=0, column=0, sticky="nsew")
+        self.predicted_graph_canvas.bind("<Configure>", self.on_predicted_graph_configure)
 
     def build_launch_rules_page(self, parent: ttk.Frame) -> None:
         parent.rowconfigure(2, weight=1)
@@ -1020,6 +1051,9 @@ class NasaMccApp(tk.Tk):
     def on_flight_graph_configure(self, _event: tk.Event) -> None:
         self.draw_flight_graph()
 
+    def on_predicted_graph_configure(self, _event: tk.Event) -> None:
+        self.draw_predicted_flight_graph()
+
     def build_top_summary_item(self, parent: ttk.Frame, column: int, label_text: str, variable: tk.StringVar) -> None:
         block = ttk.Frame(parent, style="Panel.TFrame", padding=8)
         block.grid(row=0, column=column, sticky="nsew")
@@ -1030,6 +1064,7 @@ class NasaMccApp(tk.Tk):
         flight_data = self.current_bundle.get("vehicle_flight", {})
         flight_points = self.load_flight_log_points()
         forecast_rows = self.load_launch_forecast_rows()
+        forecast_points: list[dict[str, float]] = []
 
         if self.flight_online and flight_points:
             latest_point = flight_points[-1]
@@ -1041,23 +1076,6 @@ class NasaMccApp(tk.Tk):
             self.visual_summary_vars["speed"].set(self.format_speed_label(latest_point.get("surface_speed_mps", 0.0)))
             self.visual_summary_vars["samples"].set(f"{len(flight_points)} samples")
             self.flight_log_points = flight_points
-            if hasattr(self, "flight_graph_canvas"):
-                self.draw_flight_graph(flight_points)
-            return
-
-        self.launch_forecast_rows = forecast_rows
-        points: list[dict[str, float]] = []
-
-        if forecast_rows:
-            latest_row = forecast_rows[-1]
-            points = self.parse_launch_forecast_points(str(latest_row.get("route_points", "")))
-            status_text = str(latest_row.get("route_status", "FORECAST")).replace("_", " ").upper()
-            self.visual_summary_vars["status"].set(status_text)
-            self.visual_summary_vars["route"].set(str(latest_row.get("route_name", "No forecast route")))
-            self.visual_summary_vars["altitude"].set(self.format_distance_label(latest_row.get("predicted_altitude_m", 0.0)))
-            self.visual_summary_vars["downrange"].set(self.format_distance_label(latest_row.get("predicted_downrange_m", 0.0)))
-            self.visual_summary_vars["speed"].set(self.format_speed_label(latest_row.get("estimated_delta_v_mps", 0.0)))
-            self.visual_summary_vars["samples"].set(f"{len(points)} route points")
         else:
             if flight_points:
                 latest_point = flight_points[-1]
@@ -1067,7 +1085,7 @@ class NasaMccApp(tk.Tk):
                 self.visual_summary_vars["downrange"].set(self.format_distance_label(latest_point.get("downrange_m", 0.0)))
                 self.visual_summary_vars["speed"].set(self.format_speed_label(latest_point.get("surface_speed_mps", 0.0)))
                 self.visual_summary_vars["samples"].set(f"{len(flight_points)} samples")
-                points = flight_points
+                self.flight_log_points = flight_points
             else:
                 status_text = str(flight_data.get("status", "Awaiting flight data")).replace("_", " ").strip()
                 self.visual_summary_vars["status"].set(status_text.title())
@@ -1076,10 +1094,32 @@ class NasaMccApp(tk.Tk):
                 self.visual_summary_vars["downrange"].set(self.format_distance_label(flight_data.get("downrange_distance_m", 0.0)))
                 self.visual_summary_vars["speed"].set(self.format_speed_label(flight_data.get("surface_speed", 0.0)))
                 self.visual_summary_vars["samples"].set("0 route points")
-        self.flight_log_points = points
+            self.flight_log_points = flight_points
+
+        self.launch_forecast_rows = forecast_rows
+        if forecast_rows:
+            latest_row = forecast_rows[-1]
+            forecast_points = self.parse_launch_forecast_points(str(latest_row.get("route_points", "")))
+            status_text = str(latest_row.get("route_status", "FORECAST")).replace("_", " ").upper()
+            self.predicted_summary_vars["status"].set(status_text)
+            self.predicted_summary_vars["route"].set(str(latest_row.get("route_name", "No forecast route")))
+            self.predicted_summary_vars["altitude"].set(self.format_distance_label(latest_row.get("predicted_altitude_m", 0.0)))
+            self.predicted_summary_vars["downrange"].set(self.format_distance_label(latest_row.get("predicted_downrange_m", 0.0)))
+            self.predicted_summary_vars["speed"].set(self.format_speed_label(latest_row.get("estimated_delta_v_mps", 0.0)))
+            self.predicted_summary_vars["samples"].set(f"{len(forecast_points)} route points")
+        else:
+            self.predicted_summary_vars["status"].set("AWAITING FORECAST")
+            self.predicted_summary_vars["route"].set("Awaiting launch forecast")
+            self.predicted_summary_vars["altitude"].set("0 m")
+            self.predicted_summary_vars["downrange"].set("0 m")
+            self.predicted_summary_vars["speed"].set("0 m/s")
+            self.predicted_summary_vars["samples"].set("0 route points")
+        self.predicted_flight_points = forecast_points
 
         if hasattr(self, "flight_graph_canvas"):
-            self.draw_flight_graph(points)
+            self.draw_flight_graph(self.flight_log_points)
+        if hasattr(self, "predicted_graph_canvas"):
+            self.draw_predicted_flight_graph(self.predicted_flight_points)
 
     def refresh_launch_rules_page(self) -> None:
         if not hasattr(self, "launch_rules_tree"):
@@ -1090,12 +1130,23 @@ class NasaMccApp(tk.Tk):
         gate_record = self.current_bundle.get("launch_rule_check", {})
 
         countdown_armed = self.is_truthy(tower.get("countdown_armed"))
+        tower_gate_required = self.is_truthy(tower.get("launch_rule_gate_required"))
         tower_seconds = self.safe_float(tower.get("seconds_to_window"))
         gate_armed = countdown_armed and tower_seconds is not None and tower_seconds > 3600
         gate_triggered = self.is_truthy(gate_record.get("gate_triggered"))
         manifest_valid = self.is_truthy(gate_record.get("manifest_valid"))
         all_rules_met = self.is_truthy(gate_record.get("all_rules_met"))
-        pending_gate = gate_armed and not gate_triggered
+        gate_required_record = self.is_truthy(gate_record.get("gate_required"))
+        gate_status_record = str(gate_record.get("status", "INACTIVE")).strip().upper()
+
+        if not countdown_armed and not gate_triggered:
+            self.launch_rule_gate_started_above_t60 = False
+        elif gate_triggered or tower_gate_required or gate_required_record or gate_status_record in {"PENDING", "PASS", "FAIL"}:
+            self.launch_rule_gate_started_above_t60 = True
+        elif gate_armed:
+            self.launch_rule_gate_started_above_t60 = True
+
+        pending_gate = (tower_gate_required or gate_armed or self.launch_rule_gate_started_above_t60 or gate_required_record or gate_status_record in {"PENDING", "PASS", "FAIL"}) and not gate_triggered
 
         readiness_state = str(
             gate_record.get(
@@ -1112,7 +1163,7 @@ class NasaMccApp(tk.Tk):
 
         if gate_triggered:
             gate_summary = "T-60 gate snapshot captured"
-        elif gate_armed:
+        elif pending_gate:
             gate_summary = "Countdown started above T-60; awaiting the gate snapshot"
             gate_status = "PENDING"
         elif countdown_armed:
@@ -1137,7 +1188,7 @@ class NasaMccApp(tk.Tk):
         self.launch_rules_note_var.set(
             gate_result_text if gate_triggered else (
                 "The T-60 launch rule snapshot is written only when the countdown starts above 60 minutes."
-                if gate_armed
+                if pending_gate
                 else gate_summary + "."
             )
         )
@@ -1152,7 +1203,7 @@ class NasaMccApp(tk.Tk):
             rows.append((label, status_text, detail))
 
         add_rule("Tower countdown armed", countdown_armed if (countdown_armed or pending_gate or gate_triggered) else None, f"{tower.get('formatted_countdown', 'T-00:00:00')} | {operator_text}")
-        add_rule("T-60 gate required", (gate_armed or gate_triggered) if (countdown_armed or pending_gate or gate_triggered) else None, gate_summary)
+        add_rule("T-60 gate required", (pending_gate or gate_triggered) if (countdown_armed or pending_gate or gate_triggered) else None, gate_summary)
         add_rule("Manifest valid", manifest_valid if gate_triggered else None, "Pending gate snapshot" if pending_gate else str(manifest_valid))
         add_rule("Readiness state GO", readiness_state == "GO" if gate_triggered else None, readiness_state)
         add_rule("Launch TWR meets minimum", (self.is_truthy(gate_record.get("liftoff_twr_ok")) or float(liftoff_twr or 0) >= 1.15) if gate_triggered else None, f"{float(liftoff_twr or 0):.2f}")
@@ -1171,7 +1222,7 @@ class NasaMccApp(tk.Tk):
             current_status = "PASS"
         elif gate_triggered:
             current_status = "FAIL"
-        elif gate_armed:
+        elif pending_gate:
             current_status = "PENDING"
         elif countdown_armed:
             current_status = "NOT REQUIRED"
@@ -1262,12 +1313,41 @@ class NasaMccApp(tk.Tk):
     def draw_flight_graph(self, points: list[dict[str, float]] | None = None) -> None:
         if not hasattr(self, "flight_graph_canvas"):
             return
+        self.draw_trajectory_graph(
+            self.flight_graph_canvas,
+            points if points is not None else self.flight_log_points,
+            empty_title="Awaiting flight log",
+            empty_body="The data CPU will populate vehicle_flight_log.csv during ascent.",
+            minimum_height=480,
+            path_color=self.colors["accent"],
+        )
 
-        canvas = self.flight_graph_canvas
+    def draw_predicted_flight_graph(self, points: list[dict[str, float]] | None = None) -> None:
+        if not hasattr(self, "predicted_graph_canvas"):
+            return
+        self.draw_trajectory_graph(
+            self.predicted_graph_canvas,
+            points if points is not None else self.predicted_flight_points,
+            empty_title="Awaiting forecast",
+            empty_body="The launch forecast snapshot will populate this path before liftoff.",
+            minimum_height=360,
+            path_color=self.colors["gold"],
+        )
+
+    def draw_trajectory_graph(
+        self,
+        canvas: tk.Canvas,
+        points: list[dict[str, float]] | None,
+        *,
+        empty_title: str,
+        empty_body: str,
+        minimum_height: int,
+        path_color: str,
+    ) -> None:
         canvas.delete("all")
 
         width = max(canvas.winfo_width(), 800)
-        height = max(canvas.winfo_height(), 480)
+        height = max(canvas.winfo_height(), minimum_height)
         canvas.configure(width=width, height=height)
 
         plot_left = 76
@@ -1277,21 +1357,18 @@ class NasaMccApp(tk.Tk):
         plot_width = max(10, width - plot_left - plot_right)
         plot_height = max(10, height - plot_top - plot_bottom)
 
-        if points is None:
-            points = self.flight_log_points
-
         if not points:
             canvas.create_text(
                 width / 2,
                 height / 2 - 12,
-                text="Awaiting flight log",
+                text=empty_title,
                 fill=self.colors["muted"],
                 font=("Segoe UI", 16, "bold"),
             )
             canvas.create_text(
                 width / 2,
                 height / 2 + 18,
-                text="The data CPU will populate vehicle_flight_log.csv during ascent.",
+                text=empty_body,
                 fill=self.colors["muted"],
                 font=("Segoe UI", 11),
             )
@@ -1326,7 +1403,7 @@ class NasaMccApp(tk.Tk):
             path_points.extend((x_pos, y_pos))
 
         if len(path_points) >= 4:
-            canvas.create_line(*path_points, fill=self.colors["accent"], width=2, smooth=True)
+            canvas.create_line(*path_points, fill=path_color, width=2, smooth=True)
 
         for index, point in enumerate(points[-30:]):
             x_pos, y_pos = project(point)
@@ -1555,11 +1632,6 @@ class NasaMccApp(tk.Tk):
             command_text = f"{command_text} | WINDOWED"
         self.command_status_var.set(f"Command queued: {command_text} | Revision {payload['command_revision']}")
         self.push_log(self.command_status_var.get())
-
-        if command_name in {"start_countdown", "set_countdown", "abort", "hold", "resume"}:
-            if self.pending_command_clear is not None:
-                self.after_cancel(self.pending_command_clear)
-            self.pending_command_clear = self.after(1500, self.clear_active_command)
 
     def clear_active_command(self) -> None:
         vehicle_id = VEHICLES[self.selected_vehicle_name.get()]["vehicle_id"]

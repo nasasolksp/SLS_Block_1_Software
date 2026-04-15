@@ -170,7 +170,7 @@ class MccBridgeClient:
         launch_window_mode: str | None = None,
     ) -> dict[str, Any]:
         current = self._read_record(self.paths.command_path, {})
-        next_revision = int(current.get("command_revision", 0)) + 1
+        next_revision = self._coerce_revision(current.get("command_revision", 0)) + 1
 
         payload = {
             "command_revision": next_revision,
@@ -187,7 +187,7 @@ class MccBridgeClient:
 
     def clear_command(self, vehicle_id: str) -> dict[str, Any]:
         current = self._read_record(self.paths.command_path, {})
-        next_revision = int(current.get("command_revision", 0)) + 1
+        next_revision = self._coerce_revision(current.get("command_revision", 0)) + 1
 
         payload = {
             "command_revision": next_revision,
@@ -231,6 +231,13 @@ class MccBridgeClient:
             return self._read_record(path, {})
 
         return None
+
+    @staticmethod
+    def _coerce_revision(value: Any) -> int:
+        try:
+            return int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            return 0
 
     def _atomic_write_record(self, path: Path, payload: dict[str, Any]) -> None:
         temp_path = path.with_suffix(path.suffix + ".tmp")

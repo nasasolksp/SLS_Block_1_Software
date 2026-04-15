@@ -89,7 +89,7 @@ FUNCTION RunTerminalSequence {
     LOCAL wetDressEnabled TO launchSettings["wet_dress_enabled"].
     LOCAL wetDressStopSeconds TO launchSettings["wet_dress_stop_seconds"].
     LOCAL wetDressHoldActive TO FALSE.
-    LOCAL launchRuleGateEnabled TO (launchEpochSeconds - TIME:SECONDS) > 3600.
+    LOCAL launchRuleGateRequired TO (launchEpochSeconds - TIME:SECONDS) > 3600.
     LOCAL launchRuleGateTriggered TO FALSE.
     SET launchReadinessSnapshot TO BuildLaunchReadinessReport(
         missionSettings,
@@ -125,6 +125,7 @@ FUNCTION RunTerminalSequence {
                 SET abortActive TO operatorUpdate["abort_active"].
                 SET heldCountdownSeconds TO operatorUpdate["held_countdown_seconds"].
                 SET operatorStatusText TO operatorUpdate["operator_status_text"].
+                SET launchRuleGateRequired TO operatorUpdate["launch_rule_gate_required"].
             }.
         } ELSE {
             SET operatorStatusText TO "LOCAL COUNTDOWN ACTIVE".
@@ -233,7 +234,11 @@ FUNCTION RunTerminalSequence {
             resolvedManifest
         ).
 
-        IF launchRuleGateEnabled AND NOT launchRuleGateTriggered AND secondsToLaunch <= 3600 {
+        IF countdownArmed AND NOT abortActive AND NOT countdownHoldActive AND secondsToLaunch > 3600 {
+            SET launchRuleGateRequired TO TRUE.
+        }.
+
+        IF launchRuleGateRequired AND NOT launchRuleGateTriggered AND secondsToLaunch <= 3600 {
             WriteLaunchRuleCheckStatus(
                 missionSettings,
                 launchSettings,
@@ -248,7 +253,7 @@ FUNCTION RunTerminalSequence {
                 countdownHoldActive,
                 abortActive,
                 operatorStatusText,
-                launchRuleGateEnabled,
+                launchRuleGateRequired,
                 TRUE
             ).
             SET launchRuleGateTriggered TO TRUE.
@@ -340,7 +345,10 @@ FUNCTION WaitForTowerHandoff {
             FALSE,
             FALSE,
             FALSE,
-            "AWAITING TOWER HANDOFF"
+            "AWAITING TOWER HANDOFF",
+            launchSettings["wet_dress_enabled"],
+            launchSettings["wet_dress_stop_seconds"],
+            FALSE
         ).
         WAIT 0.1.
     }.
