@@ -1,0 +1,9 @@
+command_revision=66926.7274591892
+vehicle_id=sls_block_1
+command=tower_handoff
+countdown_seconds=30
+launch_epoch_seconds=66956.7274591892
+target_body=
+launch_window_mode=
+launch_node_longitude=-80.6239449105306
+issued_at_utc=66926.7274591892

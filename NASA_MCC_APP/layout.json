@@ -1,0 +1,34 @@
+{
+  "cards": [
+    {
+      "card_id": "card_0",
+      "field": "tower.formatted_countdown",
+      "x": 28,
+      "y": 12
+    },
+    {
+      "card_id": "card_1",
+      "field": "tower.operator_status_text",
+      "x": 393,
+      "y": 20
+    },
+    {
+      "card_id": "card_2",
+      "field": "vehicle.mode",
+      "x": 772,
+      "y": 12
+    },
+    {
+      "card_id": "card_3",
+      "field": "vehicle.altitude",
+      "x": 274,
+      "y": 235
+    },
+    {
+      "card_id": "card_0",
+      "field": "vehicle_status.readiness_target_orbit_speed_mps",
+      "x": 637,
+      "y": 232
+    }
+  ]
+}
