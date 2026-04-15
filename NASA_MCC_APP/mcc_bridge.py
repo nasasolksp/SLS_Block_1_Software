@@ -39,6 +39,10 @@ class BridgePaths:
     def vehicle_launch_forecast_path(self) -> Path:
         return self.base_dir / "vehicle_launch_forecast.csv"
 
+    @property
+    def launch_rule_check_path(self) -> Path:
+        return self.base_dir / "launch_rule_check.txt"
+
 
 class MccBridgeClient:
     def __init__(self, base_dir: Path) -> None:
@@ -66,6 +70,11 @@ class MccBridgeClient:
                 "source": "vehicle",
                 "vehicle_id": DEFAULT_VEHICLE_ID,
                 "status": "offline",
+                "wet_dress_enabled": False,
+                "wet_dress_stop_seconds": 0,
+                "wet_dress_stop_time": "T-00:00:00",
+                "wet_dress_hold_active": False,
+                "wet_dress_status_text": "DISABLED",
             },
             self.paths.vehicle_flight_status_path: {
                 "source": "vehicle_flight",
@@ -98,6 +107,35 @@ class MccBridgeClient:
             self._atomic_write_text(
                 self.paths.vehicle_launch_forecast_path,
                 "sample_index,checkpoint_seconds_to_launch,checkpoint_label,mission_elapsed_seconds,route_name,launch_heading_deg,pitchover_start_altitude_m,pitchover_end_altitude_m,gravity_turn_final_pitch_deg,gravity_turn_end_altitude_m,estimated_delta_v_mps,predicted_downrange_m,predicted_altitude_m,predicted_apoapsis_m,predicted_periapsis_m,route_points\n",
+            )
+
+        if not self.paths.launch_rule_check_path.exists():
+            self._atomic_write_record(
+                self.paths.launch_rule_check_path,
+                {
+                    "source": "launch_rule_check",
+                    "vehicle_id": DEFAULT_VEHICLE_ID,
+                    "mission_name": "",
+                    "status": "INACTIVE",
+                    "gate_required": False,
+                    "gate_triggered": False,
+                    "gate_result_text": "Awaiting T-60 launch rule snapshot.",
+                    "readiness_status_text": "Awaiting diagnostics",
+                    "readiness_summary_text": "Awaiting diagnostics",
+                    "readiness_profile_text": "Awaiting diagnostics",
+                    "readiness_stage_breakdown_text": "Awaiting diagnostics",
+                    "readiness_available_delta_v_mps": 0,
+                    "readiness_required_delta_v_mps": 0,
+                    "readiness_delta_v_margin_mps": 0,
+                    "readiness_liftoff_twr": 0,
+                    "readiness_target_orbit_speed_mps": 0,
+                    "readiness_launch_losses_mps": 0,
+                    "manifest_valid": False,
+                    "countdown_hold_active": False,
+                    "abort_active": False,
+                    "all_rules_met": False,
+                    "updated_at": self._now_iso(),
+                },
             )
 
     def read_bundle(self) -> dict[str, Any]:

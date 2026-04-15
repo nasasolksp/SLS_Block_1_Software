@@ -12,6 +12,7 @@ The scripts support two operating styles:
 
 - `use_mcc_app = TRUE` for remote operator control through the MCC app
 - `use_mcc_app = FALSE` for local operation without the app
+- `wet_dress_enabled = TRUE` to run a simulated terminal countdown without igniting or releasing the vehicle
 
 In both cases the tower remains the source of truth for launch timing. The vehicle does not self-arm. It waits for the tower handoff command before terminal count begins.
 
@@ -78,6 +79,12 @@ The data CPU also writes a prelaunch forecast CSV:
 
 During countdown that file is refreshed with the current best launch profile and a sampled route preview. It is a deterministic forecast, not live flight telemetry. The MCC app uses it before liftoff and then switches to `vehicle_flight_log.csv` after launch.
 
+The vehicle also writes a launch-rule snapshot file when a countdown starts above the T-60 mark:
+
+- `MCC_Interface/launch_rule_check.txt`
+
+That snapshot drives the MCC app's `Launch Rules` tab. If the countdown begins at or below T-60, the page stays in the not-required state and no extra snapshot is written.
+
 ### 3. Install the MCC app if you want remote control
 
 If you want tower commands and telemetry routed through the GUI, run the Python app in:
@@ -85,6 +92,8 @@ If you want tower commands and telemetry routed through the GUI, run the Python 
 - `NASA_MCC_APP/app.py`
 
 The app reads and writes the bridge files in `MCC_Interface/`.
+
+It includes dedicated tabs for telemetry, launch-rule criteria, and the prelaunch trajectory forecast.
 
 If you do not want to use the app, set `use_mcc_app` to `FALSE` in `mission_configuration.ks`. The tower still arms the launch and sends the vehicle handoff locally.
 
@@ -125,6 +134,8 @@ Important settings live in the `userSettings` block:
 - `launch_roll_degrees`
 
 This file computes the launch heading from the selected inclination, so the vehicle does not default to a fixed eastward launch.
+
+If you enable wet dress mode, set `wet_dress_stop_time` to the countdown point where the simulation should freeze. The vehicle will continue to report the countdown and readiness state, but it will not perform the physical launch actions.
 
 ### `Space_Launch_System_B1/sls_parts_manifest.ks`
 

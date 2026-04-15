@@ -86,6 +86,11 @@ FUNCTION RunTerminalSequence {
     LOCAL abortActive TO FALSE.
     LOCAL heldCountdownSeconds TO 0.
     LOCAL operatorStatusText TO "READY".
+    LOCAL wetDressEnabled TO launchSettings["wet_dress_enabled"].
+    LOCAL wetDressStopSeconds TO launchSettings["wet_dress_stop_seconds"].
+    LOCAL wetDressHoldActive TO FALSE.
+    LOCAL launchRuleGateEnabled TO (launchEpochSeconds - TIME:SECONDS) > 3600.
+    LOCAL launchRuleGateTriggered TO FALSE.
     SET launchReadinessSnapshot TO BuildLaunchReadinessReport(
         missionSettings,
         launchSettings,
@@ -136,7 +141,20 @@ FUNCTION RunTerminalSequence {
             SET secondsToLaunch TO heldCountdownSeconds.
         }.
 
-        IF NOT countdownHoldActive {
+        IF wetDressEnabled AND NOT wetDressHoldActive AND secondsToLaunch <= wetDressStopSeconds {
+            SET wetDressHoldActive TO TRUE.
+            SET countdownHoldActive TO TRUE.
+            SET heldCountdownSeconds TO MAX(0, secondsToLaunch).
+            SET operatorStatusText TO "WET DRESS HOLD".
+        }.
+
+        IF wetDressHoldActive {
+            SET countdownHoldActive TO TRUE.
+            SET operatorStatusText TO "WET DRESS HOLD".
+            SET secondsToLaunch TO heldCountdownSeconds.
+        }.
+
+        IF NOT countdownHoldActive AND NOT wetDressEnabled {
             IF NOT engineStarted AND secondsToLaunch <= launchSettings["engine_start_time_seconds"] {
                 LOCK THROTTLE TO 1.
                 ExecuteManifestGroup(resolvedManifest["core_engines"]).
@@ -215,6 +233,27 @@ FUNCTION RunTerminalSequence {
             resolvedManifest
         ).
 
+        IF launchRuleGateEnabled AND NOT launchRuleGateTriggered AND secondsToLaunch <= 3600 {
+            WriteLaunchRuleCheckStatus(
+                missionSettings,
+                launchSettings,
+                readinessSettings,
+                resolvedManifest,
+                secondsToLaunch,
+                engineStarted,
+                boostersIgnited,
+                releaseTriggered,
+                padReleased,
+                commitTriggered,
+                countdownHoldActive,
+                abortActive,
+                operatorStatusText,
+                launchRuleGateEnabled,
+                TRUE
+            ).
+            SET launchRuleGateTriggered TO TRUE.
+        }.
+
         ClearScreenForMode("TERMINAL COUNTDOWN", lastDisplayMode).
         SET lastDisplayMode TO "TERMINAL COUNTDOWN".
 
@@ -243,7 +282,10 @@ FUNCTION RunTerminalSequence {
             commitTriggered,
             countdownHoldActive,
             abortActive,
-            operatorStatusText
+            operatorStatusText,
+            wetDressEnabled,
+            wetDressStopSeconds,
+            wetDressHoldActive
         ).
 
         WAIT 0.1.
@@ -451,10 +493,19 @@ FUNCTION ApplyVehicleOperatorCommand {
 }.
 
 FUNCTION WriteVehicleBridgeStatus {
-    PARAMETER missionSettings, launchSettings, modeName, secondsToLaunch, engineStarted, boostersIgnited, releaseTriggered, padReleased, commitTriggered, countdownHoldActive, abortActive, operatorStatusText.
+    PARAMETER missionSettings, launchSettings, modeName, secondsToLaunch, engineStarted, boostersIgnited, releaseTriggered, padReleased, commitTriggered, countdownHoldActive, abortActive, operatorStatusText, wetDressEnabled, wetDressStopSeconds, wetDressHoldActive.
 
     LOCAL eventTimeDisplay TO ResolveVehicleEventTimeDisplay(secondsToLaunch, padReleased).
     LOCAL missionElapsedSeconds TO GetLaunchElapsedSeconds().
+    LOCAL wetDressStatusText TO "DISABLED".
+
+    IF wetDressEnabled {
+        IF wetDressHoldActive {
+            SET wetDressStatusText TO "WET DRESS HOLD".
+        } ELSE {
+            SET wetDressStatusText TO "WET DRESS ARMED TO T-" + FormatCountdown(wetDressStopSeconds).
+        }.
+    }.
 
     WriteMccVehicleStatus(
         LEXICON(
@@ -481,6 +532,11 @@ FUNCTION WriteVehicleBridgeStatus {
             "countdown_hold_active", countdownHoldActive,
             "abort_active", abortActive,
             "operator_status_text", operatorStatusText,
+            "wet_dress_enabled", wetDressEnabled,
+            "wet_dress_stop_seconds", wetDressStopSeconds,
+            "wet_dress_stop_time", FormatCountdown(wetDressStopSeconds),
+            "wet_dress_hold_active", wetDressHoldActive,
+            "wet_dress_status_text", wetDressStatusText,
             "readiness_status_text", launchReadinessSnapshot["readiness_state"],
             "readiness_summary_text", launchReadinessSnapshot["summary_text"],
             "readiness_profile_text", launchReadinessSnapshot["profile_text"],
@@ -491,6 +547,71 @@ FUNCTION WriteVehicleBridgeStatus {
             "readiness_liftoff_twr", ROUND(launchReadinessSnapshot["liftoff_twr"], 2),
             "readiness_target_orbit_speed_mps", ROUND(launchReadinessSnapshot["target_orbit_speed_mps"], 1),
             "readiness_launch_losses_mps", ROUND(launchReadinessSnapshot["launch_losses_mps"], 1),
+            "updated_at", TIME:SECONDS
+        )
+    ).
+}.
+
+FUNCTION WriteLaunchRuleCheckStatus {
+    PARAMETER missionSettings, launchSettings, readinessSettings, resolvedManifest, secondsToLaunch, engineStarted, boostersIgnited, releaseTriggered, padReleased, commitTriggered, countdownHoldActive, abortActive, operatorStatusText, gateRequired, gateTriggered.
+
+    LOCAL readinessState TO launchReadinessSnapshot["readiness_state"].
+    LOCAL manifestValid TO ValidateResolvedManifest(resolvedManifest).
+    LOCAL deltaVMarginOk TO launchReadinessSnapshot["delta_v_margin_mps"] >= 0.
+    LOCAL liftoffTwrOk TO launchReadinessSnapshot["liftoff_twr"] >= readinessSettings["minimum_liftoff_twr"].
+    LOCAL vehicleReady TO readinessState = "GO".
+    LOCAL allRulesMet TO manifestValid AND vehicleReady AND deltaVMarginOk AND liftoffTwrOk AND NOT countdownHoldActive AND NOT abortActive.
+    LOCAL gateStatus TO "NOT_REQUIRED".
+    LOCAL gateResultText TO "T-60 launch rule check is not required for this countdown.".
+
+    IF gateRequired {
+        IF gateTriggered {
+            SET gateStatus TO "PASS".
+            SET gateResultText TO "T-60 launch rules met.".
+            IF NOT allRulesMet {
+                SET gateStatus TO "FAIL".
+                SET gateResultText TO "T-60 launch rules not fully met.".
+            }.
+        } ELSE {
+            SET gateStatus TO "PENDING".
+            SET gateResultText TO "Awaiting the T-60 launch rule check.".
+        }.
+    }.
+
+    WriteMccLaunchRuleCheck(
+        LEXICON(
+            "source", "launch_rule_check",
+            "vehicle_id", launchSettings["vehicle_id"],
+            "mission_name", missionSettings["mission_name"],
+            "status", gateStatus,
+            "gate_required", gateRequired,
+            "gate_triggered", gateTriggered,
+            "countdown_seconds", ROUND(MAX(0, secondsToLaunch), 1),
+            "formatted_countdown", FormatCountdown(secondsToLaunch),
+            "gate_result_text", gateResultText,
+            "readiness_status_text", readinessState,
+            "readiness_summary_text", launchReadinessSnapshot["summary_text"],
+            "readiness_profile_text", launchReadinessSnapshot["profile_text"],
+            "readiness_stage_breakdown_text", launchReadinessSnapshot["stage_breakdown_text"],
+            "readiness_available_delta_v_mps", ROUND(launchReadinessSnapshot["available_delta_v_mps"], 1),
+            "readiness_required_delta_v_mps", ROUND(launchReadinessSnapshot["required_delta_v_mps"], 1),
+            "readiness_delta_v_margin_mps", ROUND(launchReadinessSnapshot["delta_v_margin_mps"], 1),
+            "readiness_liftoff_twr", ROUND(launchReadinessSnapshot["liftoff_twr"], 2),
+            "readiness_target_orbit_speed_mps", ROUND(launchReadinessSnapshot["target_orbit_speed_mps"], 1),
+            "readiness_launch_losses_mps", ROUND(launchReadinessSnapshot["launch_losses_mps"], 1),
+            "manifest_valid", manifestValid,
+            "countdown_hold_active", countdownHoldActive,
+            "abort_active", abortActive,
+            "engine_started", engineStarted,
+            "boosters_ignited", boostersIgnited,
+            "release_attempted", releaseTriggered,
+            "pad_released", padReleased,
+            "liftoff_commit", commitTriggered,
+            "readiness_go", vehicleReady,
+            "delta_v_margin_ok", deltaVMarginOk,
+            "liftoff_twr_ok", liftoffTwrOk,
+            "all_rules_met", allRulesMet,
+            "operator_status_text", operatorStatusText,
             "updated_at", TIME:SECONDS
         )
     ).

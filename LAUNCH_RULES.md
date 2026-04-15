@@ -134,6 +134,8 @@ Rules:
 - manual countdown must be at least `00:00:30`
 - if the target body matches the launch body, the software resolves to manual countdown
 - if the mission is windowed, the tower only goes live inside the relative inclination window
+- if wet dress mode is enabled, the vehicle must not execute liftoff actions
+- wet dress mode freezes the terminal countdown at the configured stop time
 
 ### 6.4 Readiness Gates
 
@@ -222,6 +224,10 @@ These values are hard-coded or defaulted in the current launch stack:
 - tower clear altitude: `250 m`
 - forecast checkpoint interval: `300 s`
 - forecast final checkpoint: `20 s`
+- launch-rule snapshot gate: `T-60:00`
+- launch-rule snapshot file: `MCC_Interface/launch_rule_check.txt`
+- wet-dress mode: `wet_dress_enabled`
+- wet-dress stop time: `wet_dress_stop_time`
 - max-q start altitude: `9000 m`
 - max-q end altitude: `17000 m`
 - max-q throttle cap: `0.72`

@@ -25,14 +25,31 @@ LAYOUT_STATE_PATH = Path(__file__).resolve().parent / "layout.json"
 
 
 class DataCard:
-    def __init__(self, app: "NasaMccApp", parent: ttk.Frame, initial_field: str, card_id: str, position: tuple[int, int]) -> None:
+    DEFAULT_WIDTH = 392
+    DEFAULT_HEIGHT = 282
+    MIN_WIDTH = 320
+    MIN_HEIGHT = 240
+
+    def __init__(
+        self,
+        app: "NasaMccApp",
+        parent: ttk.Frame,
+        initial_field: str,
+        card_id: str,
+        position: tuple[int, int],
+        size: tuple[int, int] | None = None,
+    ) -> None:
         self.app = app
         self.parent = parent
         self.card_id = card_id
         self.field_var = tk.StringVar(value=initial_field)
+        self.field_display_var = tk.StringVar(value="")
         self.source_var = tk.StringVar(value="")
         self.section_var = tk.StringVar(value="")
         self.metric_var = tk.StringVar(value="")
+        self.source_display_var = tk.StringVar(value="")
+        self.section_display_var = tk.StringVar(value="")
+        self.metric_display_var = tk.StringVar(value="")
         self.value_var = tk.StringVar(value="Awaiting telemetry")
         self.meta_var = tk.StringVar(value="No source data")
         self.popout: tk.Toplevel | None = None
@@ -40,45 +57,128 @@ class DataCard:
         self.popout_meta_var = tk.StringVar(value="No source data")
         self.drag_start_x = 0
         self.drag_start_y = 0
+        self.resize_start_x = 0
+        self.resize_start_y = 0
         self.origin_x = position[0]
         self.origin_y = position[1]
+        self.origin_width = size[0] if size and len(size) > 0 else self.DEFAULT_WIDTH
+        self.origin_height = size[1] if size and len(size) > 1 else self.DEFAULT_HEIGHT
         self.is_dragging = False
+        self.is_resizing = False
         self.picker_window: tk.Toplevel | None = None
         self.pos_x = position[0]
         self.pos_y = position[1]
+        self.width = max(self.MIN_WIDTH, int(self.origin_width))
+        self.height = max(self.MIN_HEIGHT, int(self.origin_height))
+        self.selector_widths = {"source": 20, "section": 24, "metric": 24}
 
-        self.frame = ttk.Frame(parent, style="Card.TFrame", padding=14)
+        self.frame = ttk.Frame(parent, style="TelemetryCard.TFrame", padding=0)
+        self.frame.configure(width=self.width, height=self.height)
+        self.frame.grid_propagate(False)
         self.frame.columnconfigure(0, weight=1)
+        self.frame.rowconfigure(2, weight=1)
 
-        header = ttk.Frame(self.frame, style="Card.TFrame")
+        header = ttk.Frame(self.frame, style="TelemetryCardChrome.TFrame", padding=(14, 12, 14, 10))
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(0, weight=0)
-        header.columnconfigure(1, weight=2)
-        header.columnconfigure(2, weight=2)
-        header.columnconfigure(3, weight=2)
+        header.columnconfigure(1, weight=1)
+        header.columnconfigure(2, weight=0)
 
-        self.drag_handle = ttk.Label(header, text="Drag", style="Meta.TLabel", cursor="fleur")
-        self.drag_handle.grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self.drag_handle = ttk.Label(header, text="Drag", style="CardDrag.TLabel", cursor="fleur")
+        self.drag_handle.grid(row=0, column=0, sticky="w", padx=(0, 10))
         self.drag_handle.bind("<ButtonPress-1>", self.on_drag_start)
         self.drag_handle.bind("<B1-Motion>", self.on_drag_motion)
         self.drag_handle.bind("<ButtonRelease-1>", self.on_drag_release)
+        header.bind("<ButtonPress-1>", self.on_drag_start)
+        header.bind("<B1-Motion>", self.on_drag_motion)
+        header.bind("<ButtonRelease-1>", self.on_drag_release)
 
-        self.source_button = ttk.Button(header, textvariable=self.source_var, command=lambda: self.open_picker("source"), style="Panel.TButton")
-        self.source_button.grid(row=0, column=1, sticky="ew", padx=(0, 6))
-
-        self.section_button = ttk.Button(header, textvariable=self.section_var, command=lambda: self.open_picker("section"), style="Panel.TButton")
-        self.section_button.grid(row=0, column=2, sticky="ew", padx=(0, 6))
-
-        self.metric_button = ttk.Button(header, textvariable=self.metric_var, command=lambda: self.open_picker("metric"), style="Panel.TButton")
-        self.metric_button.grid(row=0, column=3, sticky="ew", padx=(0, 8))
-
-        ttk.Button(header, text="Pop Out", command=self.open_popout, style="Panel.TButton").grid(row=0, column=4, padx=(0, 6))
-        ttk.Button(header, text="Remove", command=self.remove, style="Danger.TButton").grid(row=0, column=5)
-
-        ttk.Label(self.frame, textvariable=self.value_var, style="Value.TLabel", anchor="center").grid(
-            row=1, column=0, sticky="nsew", pady=(14, 8)
+        title_block = ttk.Frame(header, style="TelemetryCardChrome.TFrame")
+        title_block.grid(row=0, column=1, sticky="ew")
+        title_block.columnconfigure(0, weight=1)
+        ttk.Label(title_block, text="Telemetry Card", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        self.field_label = ttk.Label(
+            title_block,
+            textvariable=self.field_display_var,
+            style="CardField.TLabel",
+            justify="left",
+            wraplength=max(220, self.width - 180),
         )
-        ttk.Label(self.frame, textvariable=self.meta_var, style="Meta.TLabel").grid(row=2, column=0, sticky="ew")
+        self.field_label.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+
+        action_row = ttk.Frame(header, style="TelemetryCardChrome.TFrame")
+        action_row.grid(row=0, column=2, sticky="e")
+        action_row.columnconfigure(0, weight=1)
+        ttk.Button(action_row, text="Pop Out", command=self.open_popout, style="Panel.TButton").grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(action_row, text="Remove", command=self.remove, style="Danger.TButton").grid(row=0, column=1)
+
+        selector_panel = ttk.Frame(self.frame, style="TelemetryCard.TFrame", padding=(14, 2, 14, 10))
+        selector_panel.grid(row=1, column=0, sticky="ew")
+        selector_panel.columnconfigure(1, weight=1)
+
+        self.source_label = ttk.Label(selector_panel, text="Source", style="CardMetaLabel.TLabel")
+        self.source_label.grid(row=0, column=0, sticky="w", pady=(0, 6), padx=(0, 10))
+        self.source_button = ttk.Button(
+            selector_panel,
+            textvariable=self.source_display_var,
+            command=lambda: self.open_picker("source"),
+            style="CardSelector.TButton",
+            width=10,
+        )
+        self.source_button.grid(row=0, column=1, sticky="ew", pady=(0, 6))
+
+        self.section_label = ttk.Label(selector_panel, text="Section", style="CardMetaLabel.TLabel")
+        self.section_label.grid(row=1, column=0, sticky="w", pady=(0, 6), padx=(0, 10))
+        self.section_button = ttk.Button(
+            selector_panel,
+            textvariable=self.section_display_var,
+            command=lambda: self.open_picker("section"),
+            style="CardSelector.TButton",
+            width=14,
+        )
+        self.section_button.grid(row=1, column=1, sticky="ew", pady=(0, 6))
+
+        self.metric_label = ttk.Label(selector_panel, text="Metric", style="CardMetaLabel.TLabel")
+        self.metric_label.grid(row=2, column=0, sticky="w", padx=(0, 10))
+        self.metric_button = ttk.Button(
+            selector_panel,
+            textvariable=self.metric_display_var,
+            command=lambda: self.open_picker("metric"),
+            style="CardSelector.TButton",
+            width=16,
+        )
+        self.metric_button.grid(row=2, column=1, sticky="ew")
+
+        self.value_panel = ttk.Frame(self.frame, style="TelemetryValue.TFrame", padding=(14, 12, 14, 10))
+        self.value_panel.grid(row=2, column=0, sticky="nsew")
+        self.value_panel.columnconfigure(0, weight=1)
+        self.value_panel.rowconfigure(0, weight=1)
+
+        self.value_label = ttk.Label(
+            self.value_panel,
+            textvariable=self.value_var,
+            style="TelemetryValue.TLabel",
+            anchor="w",
+            justify="left",
+            wraplength=max(260, self.width - 34),
+        )
+        self.value_label.grid(row=0, column=0, sticky="nsew")
+
+        footer = ttk.Frame(self.frame, style="TelemetryCardChrome.TFrame", padding=(14, 0, 14, 10))
+        footer.grid(row=3, column=0, sticky="ew")
+        footer.columnconfigure(0, weight=1)
+        footer.columnconfigure(1, weight=0)
+
+        self.meta_label = ttk.Label(footer, textvariable=self.meta_var, style="CardMetaBody.TLabel", justify="left", wraplength=max(260, self.width - 90))
+        self.meta_label.grid(row=0, column=0, sticky="w")
+        self.resize_handle = ttk.Label(footer, text="↘", style="CardResize.TLabel", cursor="bottom_right_corner")
+        self.resize_handle.grid(row=0, column=1, sticky="e")
+        self.resize_handle.bind("<ButtonPress-1>", self.on_resize_start)
+        self.resize_handle.bind("<B1-Motion>", self.on_resize_motion)
+        self.resize_handle.bind("<ButtonRelease-1>", self.on_resize_release)
+        self.frame.bind("<Configure>", self.on_card_configure)
+        self._bind_drag_targets(self.frame, header, title_block, selector_panel, self.value_panel, footer)
+        self._sync_layout_constraints()
 
     def update_hierarchy(self, field_catalog: dict[str, dict[str, list[str]]], preserve_field: str | None = None) -> None:
         target_field = preserve_field or self.field_var.get()
@@ -91,6 +191,8 @@ class DataCard:
         self._refresh_section_options(field_catalog)
         self._refresh_metric_options(field_catalog)
         self.field_var.set(self._compose_field_key(self.source_var.get(), self.section_var.get(), self.metric_var.get()))
+        self.field_display_var.set(self._abbreviate_field_key(self.field_var.get()))
+        self._sync_layout_constraints(field_catalog)
 
     def update_value(self, flattened_data: dict[str, Any]) -> None:
         key = self.field_var.get()
@@ -98,17 +200,21 @@ class DataCard:
         source = key.split(".", 1)[0] if "." in key else "bridge"
         display_value = self.app.stringify_value(value)
         self.value_var.set(display_value)
-        self.meta_var.set(f"Source: {source.upper()} | Field: {key}")
+        self.meta_var.set(f"Src: {self._abbreviate_segment(source).upper()} | Field: {self._abbreviate_field_key(key)}")
         self.popout_value_var.set(display_value)
         self.popout_meta_var.set(f"Source: {source.upper()} | Field: {key}")
 
     def on_source_changed(self) -> None:
         self._refresh_section_options(self.app.field_catalog)
         self._refresh_metric_options(self.app.field_catalog)
+        self.source_display_var.set(self._abbreviate_segment(self.source_var.get()))
+        self._sync_layout_constraints(self.app.field_catalog)
         self.on_metric_changed()
 
     def on_section_changed(self) -> None:
         self._refresh_metric_options(self.app.field_catalog)
+        self.section_display_var.set(self._abbreviate_segment(self.section_var.get()))
+        self._sync_layout_constraints(self.app.field_catalog)
         self.on_metric_changed()
 
     def on_metric_changed(self) -> None:
@@ -117,6 +223,11 @@ class DataCard:
         metric_name = self.metric_var.get()
 
         self.field_var.set(self._compose_field_key(source_name, section_name, metric_name))
+        self.source_display_var.set(self._abbreviate_segment(source_name))
+        self.section_display_var.set(self._abbreviate_segment(section_name))
+        self.metric_display_var.set(self._abbreviate_segment(metric_name))
+        self.field_display_var.set(self._abbreviate_field_key(self.field_var.get()))
+        self._sync_layout_constraints(self.app.field_catalog)
         self.app.refresh_data_cards()
         self.app.save_layout_state()
 
@@ -157,6 +268,10 @@ class DataCard:
         self.section_var.set(section_name)
         self.metric_var.set(metric_name)
         self.field_var.set(self._compose_field_key(source_name, section_name, metric_name))
+        self.source_display_var.set(self._abbreviate_segment(source_name))
+        self.section_display_var.set(self._abbreviate_segment(section_name))
+        self.metric_display_var.set(self._abbreviate_segment(metric_name))
+        self.field_display_var.set(self._abbreviate_field_key(self.field_var.get()))
 
     @staticmethod
     def _split_field_key(field_key: str) -> tuple[str, str, str]:
@@ -177,6 +292,37 @@ class DataCard:
         if not section_name or section_name == "(root)":
             return f"{source_name}.{metric_name}"
         return f"{source_name}.{section_name}.{metric_name}"
+
+    @staticmethod
+    def _abbreviate_segment(segment: str) -> str:
+        normalized = str(segment or "").strip()
+        if not normalized or normalized == "(root)":
+            return "r"
+
+        aliases = {
+            "tower": "t",
+            "vehicle": "v",
+            "vehicle_status": "vs",
+            "vehicle_flight": "vf",
+            "bridge": "b",
+            "launch_rule_check": "lrc",
+            "readiness": "rd",
+            "operator": "op",
+        }
+        if normalized in aliases:
+            return aliases[normalized]
+
+        parts = [part for part in normalized.split("_") if part]
+        if len(parts) == 1:
+            return normalized[:3]
+        return "".join(part[0] for part in parts)[:4]
+
+    @classmethod
+    def _abbreviate_field_key(cls, field_key: str) -> str:
+        parts = [part for part in str(field_key or "").split(".") if part]
+        if not parts:
+            return ""
+        return ".".join(cls._abbreviate_segment(part) for part in parts)
 
     def remove(self) -> None:
         if self.popout is not None and self.popout.winfo_exists():
@@ -206,6 +352,69 @@ class DataCard:
         if self.is_dragging:
             self.app.save_layout_state()
         self.is_dragging = False
+
+    def on_resize_start(self, event: tk.Event) -> None:
+        self.resize_start_x = event.x_root
+        self.resize_start_y = event.y_root
+        self.origin_width = self.width
+        self.origin_height = self.height
+        self.is_resizing = False
+
+    def on_resize_motion(self, event: tk.Event) -> None:
+        delta_x = event.x_root - self.resize_start_x
+        delta_y = event.y_root - self.resize_start_y
+        if abs(delta_x) < 4 and abs(delta_y) < 4:
+            return
+
+        self.is_resizing = True
+        new_width = max(self.MIN_WIDTH, self.origin_width + delta_x)
+        new_height = max(self.MIN_HEIGHT, self.origin_height + delta_y)
+        self.app.resize_card(self, new_width, new_height)
+
+    def on_resize_release(self, _event: tk.Event) -> None:
+        if self.is_resizing:
+            self.app.save_layout_state()
+        self.is_resizing = False
+
+    def on_card_configure(self, event: tk.Event) -> None:
+        width = max(self.MIN_WIDTH, int(event.width))
+        height = max(self.MIN_HEIGHT, int(event.height))
+        if width == self.width and height == self.height:
+            return
+
+        self.width = width
+        self.height = height
+        self._sync_layout_constraints(self.app.field_catalog)
+
+    def _bind_drag_targets(self, *widgets: ttk.Widget) -> None:
+        for widget in widgets:
+            widget.bind("<ButtonPress-1>", self.on_drag_start)
+            widget.bind("<B1-Motion>", self.on_drag_motion)
+            widget.bind("<ButtonRelease-1>", self.on_drag_release)
+
+    def _set_selector_width(self, widget: ttk.Button, current_value: str, floor: int, ceiling: int) -> None:
+        length = max(len(current_value or ""), floor)
+        widget.configure(width=max(floor, min(ceiling, length + 2)))
+
+    def _sync_layout_constraints(self, field_catalog: dict[str, dict[str, list[str]]] | None = None) -> None:
+        catalog = field_catalog or self.app.field_catalog
+        current_source = self.source_var.get()
+        current_section = self.section_var.get()
+        current_metric = self.metric_var.get()
+
+        self.source_display_var.set(self._abbreviate_segment(current_source))
+        self.section_display_var.set(self._abbreviate_segment(current_section))
+        self.metric_display_var.set(self._abbreviate_segment(current_metric))
+
+        self._set_selector_width(self.source_button, self.source_display_var.get(), 6, 10)
+        self._set_selector_width(self.section_button, self.section_display_var.get(), 6, 12)
+        self._set_selector_width(self.metric_button, self.metric_display_var.get(), 6, 14)
+
+        self.field_label.configure(wraplength=max(180, self.width - 176))
+        self.value_label.configure(wraplength=max(240, self.width - 34))
+        self.meta_label.configure(wraplength=max(220, self.width - 90))
+        self.frame.configure(width=self.width, height=self.height)
+        self.frame.grid_propagate(False)
 
     def open_picker(self, level: str) -> None:
         options = self._get_picker_options(level)
@@ -375,6 +584,7 @@ class NasaMccApp(tk.Tk):
         self.last_flight_seen_at: float = 0.0
         self.flight_log_points: list[dict[str, float]] = []
         self.launch_forecast_rows: list[dict[str, Any]] = []
+        self.launch_rule_check_rows: list[dict[str, Any]] = []
         self.visual_summary_vars = {
             "status": tk.StringVar(value="Awaiting flight data"),
             "route": tk.StringVar(value="No forecast loaded"),
@@ -383,6 +593,14 @@ class NasaMccApp(tk.Tk):
             "speed": tk.StringVar(value="0 m/s"),
             "samples": tk.StringVar(value="0 samples"),
         }
+        self.launch_rules_summary_vars = {
+            "status": tk.StringVar(value="Awaiting launch rules"),
+            "gate": tk.StringVar(value="T-60 gate inactive"),
+            "readiness": tk.StringVar(value="Awaiting diagnostics"),
+            "manifest": tk.StringVar(value="Unknown"),
+            "margin": tk.StringVar(value="0 m/s"),
+        }
+        self.launch_rules_note_var = tk.StringVar(value="The T-60 launch rule check appears here when the countdown starts above 60 minutes.")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.show_start_screen()
@@ -394,6 +612,9 @@ class NasaMccApp(tk.Tk):
         self.style.configure("Shell.TFrame", background=self.colors["bg"])
         self.style.configure("Panel.TFrame", background=self.colors["panel"])
         self.style.configure("Card.TFrame", background=self.colors["panel_alt"], relief="flat")
+        self.style.configure("TelemetryCard.TFrame", background="#081625", relief="flat", borderwidth=1)
+        self.style.configure("TelemetryCardChrome.TFrame", background="#0b1b2d")
+        self.style.configure("TelemetryValue.TFrame", background="#0d2034")
         self.style.configure("Header.TLabel", background=self.colors["bg"], foreground=self.colors["text"], font=("Bahnschrift", 22, "bold"))
         self.style.configure("SectionTitle.TLabel", background=self.colors["bg"], foreground=self.colors["gold"], font=("Bahnschrift", 14, "bold"))
         self.style.configure("Body.TLabel", background=self.colors["bg"], foreground=self.colors["muted"], font=("Segoe UI", 11))
@@ -403,6 +624,13 @@ class NasaMccApp(tk.Tk):
         self.style.configure("Value.TLabel", background=self.colors["panel_alt"], foreground=self.colors["text"], font=("Consolas", 22, "bold"))
         self.style.configure("HeroCountdown.TLabel", background=self.colors["panel"], foreground=self.colors["text"], font=("Consolas", 34, "bold"))
         self.style.configure("HeroMeta.TLabel", background=self.colors["panel"], foreground=self.colors["muted"], font=("Segoe UI", 11))
+        self.style.configure("CardDrag.TLabel", background="#10263a", foreground=self.colors["gold"], font=("Bahnschrift", 10, "bold"), padding=(8, 4))
+        self.style.configure("CardTitle.TLabel", background="#0b1b2d", foreground=self.colors["gold"], font=("Bahnschrift", 13, "bold"))
+        self.style.configure("CardField.TLabel", background="#0b1b2d", foreground=self.colors["text"], font=("Consolas", 11, "bold"))
+        self.style.configure("CardMetaLabel.TLabel", background="#081625", foreground=self.colors["muted"], font=("Segoe UI", 10, "bold"))
+        self.style.configure("CardMetaBody.TLabel", background="#0b1b2d", foreground=self.colors["muted"], font=("Consolas", 9))
+        self.style.configure("TelemetryValue.TLabel", background="#0d2034", foreground=self.colors["text"], font=("Consolas", 18, "bold"), padding=(0, 0, 0, 0))
+        self.style.configure("CardResize.TLabel", background="#10263a", foreground=self.colors["gold"], font=("Segoe UI", 8, "bold"), padding=(6, 3))
         self.style.configure("Panel.TButton", background=self.colors["highlight"], foreground=self.colors["text"], borderwidth=0, padding=8)
         self.style.map("Panel.TButton", background=[("active", "#4597bb")])
         self.style.configure("Accent.TButton", background=self.colors["accent"], foreground=self.colors["text"], borderwidth=0, padding=10)
@@ -411,12 +639,14 @@ class NasaMccApp(tk.Tk):
         self.style.map("Danger.TButton", background=[("active", "#93434c")])
         self.style.configure("Panel.TEntry", fieldbackground="#071929", foreground=self.colors["text"], insertcolor=self.colors["text"])
         self.style.configure("Panel.TCombobox", fieldbackground="#071929", foreground=self.colors["text"])
+        self.style.configure("CardSelector.TButton", background="#071929", foreground=self.colors["text"], borderwidth=1, relief="solid", padding=(6, 3), anchor="center")
+        self.style.map("CardSelector.TButton", background=[("active", "#0b243a")], foreground=[("active", self.colors["text"])])
         self.style.configure("TNotebook", background=self.colors["panel"], borderwidth=0)
         self.style.configure(
             "TNotebook.Tab",
             background=self.colors["panel_alt"],
             foreground=self.colors["text"],
-            padding=(14, 8),
+            padding=(16, 10),
         )
         self.style.map("TNotebook.Tab", background=[("selected", self.colors["highlight"])], foreground=[("selected", self.colors["text"])])
 
@@ -580,24 +810,33 @@ class NasaMccApp(tk.Tk):
         self.page_notebook.grid(row=0, column=0, sticky="nsew")
 
         telemetry_page = ttk.Frame(self.page_notebook, style="Panel.TFrame")
+        rules_page = ttk.Frame(self.page_notebook, style="Panel.TFrame")
         visual_page = ttk.Frame(self.page_notebook, style="Panel.TFrame")
         self.page_notebook.add(telemetry_page, text="Telemetry Window")
+        self.page_notebook.add(rules_page, text="Launch Rules")
         self.page_notebook.add(visual_page, text="Visual Data")
 
         self.build_workspace(telemetry_page)
+        self.build_launch_rules_page(rules_page)
         self.build_visual_page(visual_page)
 
         if self.layout_state.get("cards"):
             for card_state in self.layout_state["cards"]:
                 saved_x = card_state.get("x")
                 saved_y = card_state.get("y")
+                saved_width = card_state.get("width")
+                saved_height = card_state.get("height")
                 saved_position = None
                 if isinstance(saved_x, (int, float)) and isinstance(saved_y, (int, float)):
                     saved_position = (int(saved_x), int(saved_y))
+                saved_size = None
+                if isinstance(saved_width, (int, float)) and isinstance(saved_height, (int, float)):
+                    saved_size = (int(saved_width), int(saved_height))
                 self.add_data_card(
                     card_state.get("field"),
                     card_id=card_state.get("card_id"),
                     position=saved_position,
+                    size=saved_size,
                 )
         else:
             for field in (
@@ -609,6 +848,7 @@ class NasaMccApp(tk.Tk):
                 self.add_data_card(field)
 
         self.refresh_data_cards()
+        self.refresh_launch_rules_page()
         self.refresh_visual_page()
 
     def build_control_panel(self, parent: ttk.Frame) -> None:
@@ -731,6 +971,52 @@ class NasaMccApp(tk.Tk):
         self.flight_graph_canvas.grid(row=0, column=0, sticky="nsew")
         self.flight_graph_canvas.bind("<Configure>", self.on_flight_graph_configure)
 
+    def build_launch_rules_page(self, parent: ttk.Frame) -> None:
+        parent.rowconfigure(2, weight=1)
+        parent.columnconfigure(0, weight=1)
+
+        summary_shell = ttk.Frame(parent, style="Panel.TFrame", padding=12)
+        summary_shell.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        for column in range(5):
+            summary_shell.columnconfigure(column, weight=1, uniform="rules")
+
+        self.build_top_summary_item(summary_shell, 0, "Status", self.launch_rules_summary_vars["status"])
+        self.build_top_summary_item(summary_shell, 1, "Gate", self.launch_rules_summary_vars["gate"])
+        self.build_top_summary_item(summary_shell, 2, "Readiness", self.launch_rules_summary_vars["readiness"])
+        self.build_top_summary_item(summary_shell, 3, "Manifest", self.launch_rules_summary_vars["manifest"])
+        self.build_top_summary_item(summary_shell, 4, "Margin", self.launch_rules_summary_vars["margin"])
+
+        notes_shell = ttk.Frame(parent, style="Panel.TFrame", padding=12)
+        notes_shell.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        notes_shell.columnconfigure(0, weight=1)
+        ttk.Label(notes_shell, text="T-60 Launch Rule Check", style="PanelTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            notes_shell,
+            textvariable=self.launch_rules_note_var,
+            style="PanelText.TLabel",
+            wraplength=1000,
+            justify="left",
+        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
+
+        table_shell = ttk.Frame(parent, style="Panel.TFrame", padding=12)
+        table_shell.grid(row=2, column=0, sticky="nsew")
+        table_shell.rowconfigure(0, weight=1)
+        table_shell.columnconfigure(0, weight=1)
+
+        columns = ("criterion", "status", "details")
+        self.launch_rules_tree = ttk.Treeview(table_shell, columns=columns, show="headings", height=14)
+        self.launch_rules_tree.heading("criterion", text="Criterion")
+        self.launch_rules_tree.heading("status", text="Status")
+        self.launch_rules_tree.heading("details", text="Details")
+        self.launch_rules_tree.column("criterion", width=280, anchor="w", stretch=False)
+        self.launch_rules_tree.column("status", width=120, anchor="center", stretch=False)
+        self.launch_rules_tree.column("details", width=900, anchor="w", stretch=True)
+
+        rules_scrollbar = ttk.Scrollbar(table_shell, orient="vertical", command=self.launch_rules_tree.yview)
+        self.launch_rules_tree.configure(yscrollcommand=rules_scrollbar.set)
+        self.launch_rules_tree.grid(row=0, column=0, sticky="nsew")
+        rules_scrollbar.grid(row=0, column=1, sticky="ns")
+
     def on_flight_graph_configure(self, _event: tk.Event) -> None:
         self.draw_flight_graph()
 
@@ -794,6 +1080,104 @@ class NasaMccApp(tk.Tk):
 
         if hasattr(self, "flight_graph_canvas"):
             self.draw_flight_graph(points)
+
+    def refresh_launch_rules_page(self) -> None:
+        if not hasattr(self, "launch_rules_tree"):
+            return
+
+        tower = self.current_bundle.get("tower", {})
+        vehicle = self.current_bundle.get("vehicle", {})
+        gate_record = self.current_bundle.get("launch_rule_check", {})
+
+        countdown_armed = self.is_truthy(tower.get("countdown_armed"))
+        tower_seconds = self.safe_float(tower.get("seconds_to_window"))
+        gate_armed = countdown_armed and tower_seconds is not None and tower_seconds > 3600
+        gate_triggered = self.is_truthy(gate_record.get("gate_triggered"))
+        manifest_valid = self.is_truthy(gate_record.get("manifest_valid"))
+        all_rules_met = self.is_truthy(gate_record.get("all_rules_met"))
+        pending_gate = gate_armed and not gate_triggered
+
+        readiness_state = str(
+            gate_record.get(
+                "readiness_status_text",
+                vehicle.get("readiness_status_text", vehicle.get("readiness_summary_text", "Awaiting diagnostics")),
+            )
+        ).strip().upper()
+        readiness_summary = str(gate_record.get("readiness_summary_text", vehicle.get("readiness_summary_text", "Awaiting diagnostics")))
+        gate_status = str(gate_record.get("status", "INACTIVE")).strip().upper()
+        gate_result_text = str(gate_record.get("gate_result_text", "Awaiting T-60 launch rule snapshot."))
+        delta_v_margin = gate_record.get("readiness_delta_v_margin_mps", vehicle.get("readiness_delta_v_margin_mps", 0))
+        liftoff_twr = gate_record.get("readiness_liftoff_twr", vehicle.get("readiness_liftoff_twr", 0))
+        operator_text = str(vehicle.get("operator_status_text", tower.get("operator_status_text", "READY")))
+
+        if gate_triggered:
+            gate_summary = "T-60 gate snapshot captured"
+        elif gate_armed:
+            gate_summary = "Countdown started above T-60; awaiting the gate snapshot"
+            gate_status = "PENDING"
+        elif countdown_armed:
+            gate_summary = "Countdown started at or below T-60; gate check not required"
+            gate_status = "NOT REQUIRED"
+        else:
+            gate_summary = "Awaiting tower countdown"
+            gate_status = "INACTIVE"
+
+        self.launch_rules_summary_vars["status"].set(gate_status.replace("_", " "))
+        self.launch_rules_summary_vars["gate"].set(gate_summary)
+        self.launch_rules_summary_vars["readiness"].set(readiness_state if readiness_state else "AWAITING DIAGNOSTICS")
+        if gate_triggered:
+            self.launch_rules_summary_vars["manifest"].set("PASS" if manifest_valid else "FAIL")
+        elif pending_gate:
+            self.launch_rules_summary_vars["manifest"].set("PENDING")
+        elif countdown_armed:
+            self.launch_rules_summary_vars["manifest"].set("N/A")
+        else:
+            self.launch_rules_summary_vars["manifest"].set("INACTIVE")
+        self.launch_rules_summary_vars["margin"].set(self.format_speed_label(delta_v_margin))
+        self.launch_rules_note_var.set(
+            gate_result_text if gate_triggered else (
+                "The T-60 launch rule snapshot is written only when the countdown starts above 60 minutes."
+                if gate_armed
+                else gate_summary + "."
+            )
+        )
+
+        rows: list[tuple[str, str, str]] = []
+
+        def add_rule(label: str, passed: bool | None, detail: str) -> None:
+            if passed is None:
+                status_text = "PENDING" if pending_gate else "N/A"
+            else:
+                status_text = "PASS" if passed else "FAIL"
+            rows.append((label, status_text, detail))
+
+        add_rule("Tower countdown armed", countdown_armed if (countdown_armed or pending_gate or gate_triggered) else None, f"{tower.get('formatted_countdown', 'T-00:00:00')} | {operator_text}")
+        add_rule("T-60 gate required", (gate_armed or gate_triggered) if (countdown_armed or pending_gate or gate_triggered) else None, gate_summary)
+        add_rule("Manifest valid", manifest_valid if gate_triggered else None, "Pending gate snapshot" if pending_gate else str(manifest_valid))
+        add_rule("Readiness state GO", readiness_state == "GO" if gate_triggered else None, readiness_state)
+        add_rule("Launch TWR meets minimum", (self.is_truthy(gate_record.get("liftoff_twr_ok")) or float(liftoff_twr or 0) >= 1.15) if gate_triggered else None, f"{float(liftoff_twr or 0):.2f}")
+        add_rule("Delta-v margin non-negative", (self.is_truthy(gate_record.get("delta_v_margin_ok")) or float(delta_v_margin or 0) >= 0) if gate_triggered else None, self.format_speed_label(delta_v_margin))
+        add_rule("Countdown hold clear", (not self.is_truthy(gate_record.get("countdown_hold_active", tower.get("countdown_hold_active")))) if gate_triggered else None, f"Hold active: {self.is_truthy(gate_record.get('countdown_hold_active', tower.get('countdown_hold_active')))}")
+        add_rule("Abort clear", (not self.is_truthy(gate_record.get("abort_active", tower.get("abort_active")))) if gate_triggered else None, f"Abort active: {self.is_truthy(gate_record.get('abort_active', tower.get('abort_active')))}")
+        add_rule("All required rules met", all_rules_met if gate_triggered else None, gate_result_text)
+
+        for row_id in self.launch_rules_tree.get_children():
+            self.launch_rules_tree.delete(row_id)
+
+        for criterion, status_text, detail in rows:
+            self.launch_rules_tree.insert("", "end", values=(criterion, status_text, detail))
+
+        if gate_triggered and all_rules_met:
+            current_status = "PASS"
+        elif gate_triggered:
+            current_status = "FAIL"
+        elif gate_armed:
+            current_status = "PENDING"
+        elif countdown_armed:
+            current_status = "NOT REQUIRED"
+        else:
+            current_status = "INACTIVE"
+        self.launch_rules_summary_vars["status"].set(current_status)
 
     def load_flight_log_points(self) -> list[dict[str, float]]:
         if not self.flight_log_path.exists():
@@ -1014,11 +1398,17 @@ class NasaMccApp(tk.Tk):
         self.workspace_canvas.itemconfigure(self.workspace_window, width=max(event.width, self.workspace_frame.winfo_reqwidth()))
         self.refresh_workspace_bounds()
 
-    def add_data_card(self, preferred_field: str | None, card_id: str | None = None, position: tuple[int, int] | None = None) -> None:
+    def add_data_card(
+        self,
+        preferred_field: str | None,
+        card_id: str | None = None,
+        position: tuple[int, int] | None = None,
+        size: tuple[int, int] | None = None,
+    ) -> None:
         field_options = self.available_fields()
         initial_field = preferred_field or (field_options[0] if field_options else "tower.formatted_countdown")
         initial_position = position if self.is_valid_saved_position(position) else self.next_card_position()
-        card = DataCard(self, self.workspace_frame, initial_field, card_id or self.next_card_id(), initial_position)
+        card = DataCard(self, self.workspace_frame, initial_field, card_id or self.next_card_id(), initial_position, size=size)
         card.update_hierarchy(self.field_catalog, preserve_field=initial_field)
         self.data_cards.append(card)
         self.place_card(card)
@@ -1041,8 +1431,14 @@ class NasaMccApp(tk.Tk):
         self.place_card(card)
         self.refresh_workspace_bounds()
 
+    def resize_card(self, card: DataCard, width: int, height: int) -> None:
+        card.width = max(DataCard.MIN_WIDTH, int(width))
+        card.height = max(DataCard.MIN_HEIGHT, int(height))
+        self.place_card(card)
+        self.refresh_workspace_bounds()
+
     def place_card(self, card: DataCard) -> None:
-        card.frame.place(x=card.pos_x, y=card.pos_y, width=340)
+        card.frame.place(x=card.pos_x, y=card.pos_y, width=card.width, height=card.height)
         self.refresh_workspace_bounds()
 
     def refresh_workspace_bounds(self) -> None:
@@ -1053,8 +1449,8 @@ class NasaMccApp(tk.Tk):
         required_height = max(self.workspace_canvas.winfo_height(), 900)
 
         for card in self.data_cards:
-            card_width = max(card.frame.winfo_reqwidth(), 340)
-            card_height = max(card.frame.winfo_reqheight(), 160)
+            card_width = max(card.width, card.frame.winfo_reqwidth(), DataCard.MIN_WIDTH)
+            card_height = max(card.height, card.frame.winfo_reqheight(), DataCard.MIN_HEIGHT)
             required_width = max(required_width, card.pos_x + card_width + 24)
             required_height = max(required_height, card.pos_y + card_height + 24)
 
@@ -1192,6 +1588,7 @@ class NasaMccApp(tk.Tk):
             self.clear_vehicle_cache()
         self.update_summary()
         self.refresh_data_cards()
+        self.refresh_launch_rules_page()
         self.refresh_visual_page()
         self.after(500, self.poll_bridge)
 
@@ -1220,6 +1617,9 @@ class NasaMccApp(tk.Tk):
 
         if self.vehicle_session_active:
             operator_text = str(vehicle.get("operator_status_text", tower.get("operator_status_text", "READY")))
+            wet_dress_text = str(vehicle.get("wet_dress_status_text", "")).strip()
+            if wet_dress_text and wet_dress_text.upper() != "DISABLED":
+                operator_text = f"{operator_text} | {wet_dress_text}"
         else:
             operator_text = str(tower.get("operator_status_text", "READY"))
         self.summary_vars["operator"].set(operator_text)
@@ -1420,8 +1820,8 @@ class NasaMccApp(tk.Tk):
     def next_card_position(self) -> tuple[int, int]:
         index = len(self.data_cards)
         columns = 3
-        card_width = 360
-        card_height = 200
+        card_width = DataCard.DEFAULT_WIDTH
+        card_height = DataCard.DEFAULT_HEIGHT
         gutter = 20
         row = index // columns
         column = index % columns
@@ -1567,7 +1967,37 @@ class NasaMccApp(tk.Tk):
         cards = state.get("cards")
         if not isinstance(cards, list):
             return {"cards": []}
-        return {"cards": cards}
+
+        normalized_cards: list[dict[str, Any]] = []
+        for card_state in cards:
+            if not isinstance(card_state, dict):
+                continue
+
+            field = str(card_state.get("field", "")).strip()
+            if not field:
+                continue
+
+            width = card_state.get("width")
+            height = card_state.get("height")
+            if isinstance(width, (int, float)) and isinstance(height, (int, float)):
+                normalized_width = max(DataCard.MIN_WIDTH, int(width))
+                normalized_height = max(DataCard.MIN_HEIGHT, int(height))
+            else:
+                normalized_width = DataCard.DEFAULT_WIDTH
+                normalized_height = DataCard.DEFAULT_HEIGHT
+
+            normalized_cards.append(
+                {
+                    "card_id": str(card_state.get("card_id", "")).strip(),
+                    "field": field,
+                    "x": int(card_state.get("x", 12)) if isinstance(card_state.get("x"), (int, float)) else 12,
+                    "y": int(card_state.get("y", 12)) if isinstance(card_state.get("y"), (int, float)) else 12,
+                    "width": normalized_width,
+                    "height": normalized_height,
+                }
+            )
+
+        return {"cards": normalized_cards}
 
     def save_layout_state(self) -> None:
         if not hasattr(self, "workspace_frame"):
@@ -1580,6 +2010,8 @@ class NasaMccApp(tk.Tk):
                     "field": card.field_var.get(),
                     "x": card.pos_x,
                     "y": card.pos_y,
+                    "width": card.width,
+                    "height": card.height,
                 }
                 for card in self.data_cards
             ]

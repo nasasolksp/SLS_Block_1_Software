@@ -32,6 +32,8 @@ GLOBAL FUNCTION GetMissionConfiguration {
         "target_body_periapsis", 456000,
         "target_inclination", -28.62,
         "manual_countdown_time", "00:00:30",
+        "wet_dress_enabled", FALSE,
+        "wet_dress_stop_time", "00:05:00",
         "launch_roll_degrees", 90
     ).
 
@@ -55,6 +57,12 @@ GLOBAL FUNCTION GetMissionConfiguration {
     LOCAL windowSolutionRefreshSeconds TO 1800.
     LOCAL relativeInclinationSearchStepSeconds TO 300.
     LOCAL relativeInclinationRefineStepSeconds TO 5.
+    LOCAL wetDressStopValidation TO ParseCountdownTimeToSeconds(userSettings["wet_dress_stop_time"]).
+    LOCAL wetDressStopSeconds TO 30.
+
+    IF wetDressStopValidation["is_valid"] {
+        SET wetDressStopSeconds TO wetDressStopValidation["countdown_seconds"].
+    }.
 
     LOCAL handoffTimeSeconds TO 120.
     LOCAL vehicleId TO "sls_block_1".
@@ -93,7 +101,10 @@ GLOBAL FUNCTION GetMissionConfiguration {
         "post_liftoff_heading", postLiftoffHeading,
         "post_liftoff_roll", postLiftoffRoll,
         "post_liftoff_throttle", postLiftoffThrottle,
-        "tower_clear_altitude", towerClearAltitude
+        "tower_clear_altitude", towerClearAltitude,
+        "wet_dress_enabled", userSettings["wet_dress_enabled"],
+        "wet_dress_stop_time", userSettings["wet_dress_stop_time"],
+        "wet_dress_stop_seconds", wetDressStopSeconds
     ).
 
     LOCAL ascentConfig TO LEXICON(
@@ -220,3 +231,27 @@ GLOBAL FUNCTION GetMissionConfiguration {
         "readiness", readinessConfig
     ).
 }
+
+GLOBAL FUNCTION ParseCountdownTimeToSeconds {
+    PARAMETER countdownString.
+
+    LOCAL parts TO countdownString:SPLIT(":").
+
+    IF parts:LENGTH <> 3 {
+        RETURN LEXICON("is_valid", FALSE, "countdown_seconds", 0, "message", "Countdown must be HH:MM:SS.").
+    }.
+
+    LOCAL hoursValue TO parts[0]:TONUMBER.
+    LOCAL minutesValue TO parts[1]:TONUMBER.
+    LOCAL secondsValue TO parts[2]:TONUMBER.
+
+    IF hoursValue < 0 OR minutesValue < 0 OR minutesValue > 59 OR secondsValue < 0 OR secondsValue > 59 {
+        RETURN LEXICON("is_valid", FALSE, "countdown_seconds", 0, "message", "Countdown is out of range.").
+    }.
+
+    RETURN LEXICON(
+        "is_valid", TRUE,
+        "countdown_seconds", (hoursValue * 3600) + (minutesValue * 60) + secondsValue,
+        "message", ""
+    ).
+}.
